@@ -4,6 +4,7 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 type ManualReportModalProps = {
 	visible: boolean;
 	errorHint?: string | null;
+	initialValue?: string;
 	onSubmit: (description: string) => void;
 	onCancel: () => void;
 };
@@ -11,6 +12,7 @@ type ManualReportModalProps = {
 export default function ManualReportModal({
 	visible,
 	errorHint,
+	initialValue,
 	onSubmit,
 	onCancel,
 }: ManualReportModalProps) {
@@ -18,17 +20,21 @@ export default function ManualReportModal({
 
 	useEffect(() => {
 		if (visible) {
-			setText('');
+			setText(initialValue ?? '');
 		}
-	}, [visible]);
+	}, [visible, initialValue]);
 
 	return (
 		<Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
 			<View style={styles.overlay}>
 				<View style={styles.card}>
-					<Text style={styles.title}>Describe el obstáculo</Text>
+					<Text style={styles.title}>
+						{initialValue ? 'Confirma el reporte' : 'Describe el obstáculo'}
+					</Text>
 					<Text style={styles.message}>
-						No se pudo analizar la foto automáticamente. Escribe qué ves (calle, rampa, obra, ruta bloqueada, etc.).
+						{initialValue
+							? 'Revisa la descripción detectada y corrígela si es necesario.'
+							: 'No se pudo analizar la foto automáticamente. Escribe qué ves (calle, rampa, obra, ruta bloqueada, etc.).'}
 					</Text>
 
 					{errorHint ? <Text style={styles.errorHint}>{errorHint}</Text> : null}

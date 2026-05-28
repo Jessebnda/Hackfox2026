@@ -27,8 +27,6 @@ import { parseMapCenter } from '@/utils/coordinates';
 
 type MapScreenProps = {
 	bottomInset?: number;
-	expanded?: boolean;
-	onToggleExpanded?: () => void;
 };
 
 type ExpandedPanel = 'map' | 'search';
@@ -63,12 +61,11 @@ function formatRouteSummary(distanceMeters: number, durationSeconds: number) {
 	return `${km} · ~${minutes} min a pie`;
 }
 
-export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded }: MapScreenProps) {
+export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [region, setRegion] = useState<Region>(() => ({
 		...DEFAULT_REGION,
 		...parseMapCenter(process.env.EXPO_PUBLIC_MAP_CENTER),
 	}));
-	const [localExpanded, setLocalExpanded] = useState(false);
 	const [expandedPanel, setExpandedPanel] = useState<ExpandedPanel>('map');
 	const [selectedPointId, setSelectedPointId] = useState(ACCESSIBLE_POINTS[0].id);
 	const [locationStatus, setLocationStatus] = useState<'loading' | 'ready' | 'blocked'>('loading');
@@ -88,9 +85,9 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 	const [reportNotice, setReportNotice] = useState<string | null>(null);
 	const [showManualReportModal, setShowManualReportModal] = useState(false);
 	const [visionErrorHint, setVisionErrorHint] = useState<string | null>(null);
+	const [prefillDescription, setPrefillDescription] = useState<string | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const isExpanded = expanded ?? localExpanded;
 
 	const selectedPoint = useMemo(
 		() => ACCESSIBLE_POINTS.find((point) => point.id === selectedPointId) ?? ACCESSIBLE_POINTS[0],
@@ -139,13 +136,6 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		};
 	}, []);
 
-	useEffect(() => {
-		if (!isExpanded) {
-			setExpandedPanel('map');
-			setSearchQuery('');
-			setSearchResults([]);
-		}
-	}, [isExpanded]);
 
 	useEffect(() => {
 		if (searchDebounceRef.current) {
@@ -201,12 +191,12 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 	};
 
 	useEffect(() => {
-		if (!isExpanded || expandedPanel !== 'search' || userLocation || locationStatus === 'blocked') {
+		if (expandedPanel !== 'search' || userLocation || locationStatus === 'blocked') {
 			return;
 		}
 
 		void centerOnUser();
-	}, [isExpanded, expandedPanel, userLocation, locationStatus]);
+	}, [expandedPanel, userLocation, locationStatus]);
 
 	const focusCoordinate = (latitude: number, longitude: number, delta = 0.04) => {
 		const nextRegion = {
@@ -285,15 +275,6 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		);
 	};
 
-	const handleToggleExpanded = () => {
-		if (onToggleExpanded) {
-			onToggleExpanded();
-			return;
-		}
-
-		setLocalExpanded((current) => !current);
-	};
-
 	const resolveUserLocation = async (): Promise<LatLng | null> => {
 		if (userLocation) {
 			return userLocation;
@@ -369,6 +350,7 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		setShowRerouteModal(false);
 		setShowManualReportModal(false);
 		setVisionErrorHint(null);
+		setPrefillDescription(null);
 		await performReroute();
 	};
 
@@ -408,10 +390,13 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 				base64: asset.base64,
 			});
 
-			await saveReportAndReroute(description);
+			setPrefillDescription(description);
+			setShowRerouteModal(false);
+			setShowManualReportModal(true);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'No se pudo analizar la foto.';
 			setVisionErrorHint(message);
+			setPrefillDescription(null);
 			setShowRerouteModal(false);
 			setShowManualReportModal(true);
 		} finally {
@@ -441,20 +426,10 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		<View style={styles.container}>
 			<StatusBar style="dark" />
 			<ScreenShell>
-				<View style={[styles.header, isExpanded && styles.headerCompact]}>
-					{!isExpanded && (
-						<Text style={styles.subtitle}>
-							Mapa de referencia para rutas accesibles, puntos de apoyo y zonas seguras.
-						</Text>
-					)}
-					<Pressable style={styles.expandButton} onPress={handleToggleExpanded}>
-						<MaterialCommunityIcons name={isExpanded ? 'arrow-collapse' : 'arrow-expand'} size={18} color="#111" />
-						<Text style={styles.expandButtonText}>{isExpanded ? 'Reducir' : 'Expandir'}</Text>
-					</Pressable>
+				<View style={[styles.header, styles.headerCompact]}>
 				</View>
 
-				{isExpanded && (
-					<View style={styles.expandedTabs}>
+				<View style={styles.expandedTabs}>
 						<Pressable
 							style={[styles.expandedTab, expandedPanel === 'map' && styles.expandedTabActive]}
 							onPress={() => setExpandedPanel('map')}
@@ -482,24 +457,8 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 							</Text>
 						</Pressable>
 					</View>
-				)}
 
-				{!isExpanded && (
-					<View style={styles.summaryRow}>
-						<View style={styles.summaryCard}>
-							<MaterialCommunityIcons name="map-marker-radius" size={20} color="#e80000" />
-							<Text style={styles.summaryTitle}>{ACCESSIBLE_POINTS.length} puntos</Text>
-							<Text style={styles.summaryText}>Cercanos al centro</Text>
-						</View>
-						<View style={styles.summaryCard}>
-							<MaterialCommunityIcons name="wheelchair-accessibility" size={20} color="#111" />
-							<Text style={styles.summaryTitle}>Accesibilidad</Text>
-							<Text style={styles.summaryText}>Rutas sin barreras</Text>
-						</View>
-					</View>
-				)}
-
-				{locationStatus === 'blocked' && !isExpanded && (
+				{locationStatus === 'blocked' && (
 					<View style={styles.banner}>
 						<Text style={styles.bannerText}>Activa la ubicación para centrar el mapa en tu posición.</Text>
 					</View>
@@ -537,11 +496,11 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 					</View>
 				)}
 
-				{(expandedPanel === 'map' || !isExpanded) && (
-					<View style={[styles.mapCard, isExpanded && styles.mapCardExpanded, { marginBottom: isExpanded ? 8 : 10 + bottomInset }]}>
+				{expandedPanel === 'map' && (
+					<View style={[styles.mapCard, styles.mapCardExpanded, { marginBottom: 8 }]}>
 						<MapView
 							ref={mapRef}
-							style={[styles.map, isExpanded && styles.mapExpanded]}
+							style={[styles.map, styles.mapExpanded]}
 							region={region}
 							onRegionChangeComplete={setRegion}
 							showsCompass
@@ -594,15 +553,10 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 							</View>
 						)}
 
-						<View style={styles.footerBadge}>
-							<Text style={styles.footerBadgeText}>
-								{routeCoordinates.length > 1 ? 'Ruta OpenRouteService' : 'Mapa accesible listo'}
-							</Text>
-						</View>
 					</View>
 				)}
 
-				{isExpanded && expandedPanel === 'search' && (
+				{expandedPanel === 'search' && (
 					<View style={[styles.searchPanel, { marginBottom: 10 + bottomInset }]}>
 						<View style={styles.searchInputWrap}>
 							<MaterialCommunityIcons name="magnify" size={20} color="#666" />
@@ -664,50 +618,7 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 					</View>
 				)}
 
-				{!isExpanded && (
-					<>
-						<View style={styles.controlsRow}>
-							<Pressable style={styles.controlButton} onPress={() => focusPoint(selectedPoint)}>
-								<MaterialCommunityIcons name="map-marker-radius" size={18} color="#111" />
-								<Text style={styles.controlText}>Centrar</Text>
-							</Pressable>
-							<Pressable style={styles.controlButton} onPress={centerOnUser}>
-								<MaterialCommunityIcons name="crosshairs-gps" size={18} color="#111" />
-								<Text style={styles.controlText}>Mi ubicación</Text>
-							</Pressable>
-							<Pressable
-								style={[styles.controlButton, styles.controlButtonAccent]}
-								onPress={() => void calculateRouteTo(selectedPoint, selectedPoint.name)}
-								disabled={isRouting}
-							>
-								<MaterialCommunityIcons name="routes" size={18} color="#fff" />
-								<Text style={[styles.controlText, styles.controlTextAccent]}>Ruta</Text>
-							</Pressable>
-						</View>
-
-						<FlatList
-							data={ACCESSIBLE_POINTS}
-							keyExtractor={(item) => item.id}
-							horizontal
-							showsHorizontalScrollIndicator={false}
-							contentContainerStyle={[styles.cardsRail, { paddingBottom: 18 + bottomInset }]}
-							renderItem={({ item }) => {
-								const active = item.id === selectedPoint.id;
-								return (
-									<Pressable style={[styles.pointCard, active && styles.pointCardActive]} onPress={() => focusPoint(item)}>
-										<View style={[styles.pointIcon, { backgroundColor: item.accent }]}>
-											<MaterialCommunityIcons name={item.icon} size={20} color="#fff" />
-										</View>
-										<Text style={styles.pointTitle} numberOfLines={1}>{item.name}</Text>
-										<Text style={styles.pointDescription} numberOfLines={2}>{item.description}</Text>
-									</Pressable>
-								);
-							}}
-						/>
-					</>
-				)}
-
-				{isExpanded && expandedPanel === 'map' && (
+				{expandedPanel === 'map' && (
 					<View style={[styles.expandedHint, { marginBottom: 10 + bottomInset }]}>
 						<View style={styles.expandedHintDot} />
 						<Text style={styles.expandedHintText}>{activeLabel}</Text>
@@ -740,10 +651,12 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 			<ManualReportModal
 				visible={showManualReportModal}
 				errorHint={visionErrorHint}
+				initialValue={prefillDescription ?? undefined}
 				onSubmit={(text) => void handleManualReportSubmit(text)}
 				onCancel={() => {
 					setShowManualReportModal(false);
 					setVisionErrorHint(null);
+					setPrefillDescription(null);
 				}}
 			/>
 		</View>
@@ -762,16 +675,6 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		justifyContent: 'space-between',
-	},
-	headerCompact: {
-		paddingBottom: 4,
-	},
-	subtitle: {
-		flex: 1,
-		marginRight: 10,
-		color: '#666',
-		fontSize: 13,
-		lineHeight: 19,
 	},
 	expandedTabs: {
 		flexDirection: 'row',
@@ -802,36 +705,6 @@ const styles = StyleSheet.create({
 	},
 	expandedTabTextActive: {
 		color: '#e80000',
-	},
-	summaryRow: {
-		flexDirection: 'row',
-		gap: 12,
-		paddingHorizontal: 18,
-		marginBottom: 10,
-	},
-	summaryCard: {
-		flex: 1,
-		backgroundColor: '#fff',
-		borderRadius: 20,
-		padding: 12,
-		borderWidth: 1,
-		borderColor: 'rgba(17, 24, 39, 0.08)',
-		shadowColor: '#000',
-		shadowOpacity: 0.06,
-		shadowRadius: 10,
-		shadowOffset: { width: 0, height: 6 },
-		elevation: 3,
-	},
-	summaryTitle: {
-		fontSize: 14,
-		fontWeight: '800',
-		color: '#111',
-		marginTop: 8,
-	},
-	summaryText: {
-		fontSize: 12,
-		color: '#666',
-		marginTop: 4,
 	},
 	banner: {
 		marginHorizontal: 18,
@@ -933,7 +806,7 @@ const styles = StyleSheet.create({
 	},
 	map: {
 		flex: 1,
-		minHeight: 270,
+		minHeight: 320,
 	},
 	mapExpanded: {
 		minHeight: 420,
@@ -966,73 +839,6 @@ const styles = StyleSheet.create({
 	routingOverlayText: {
 		fontSize: 13,
 		fontWeight: '700',
-		color: '#111',
-	},
-	footerBadge: {
-		position: 'absolute',
-		left: 14,
-		bottom: 14,
-		backgroundColor: 'rgba(255, 255, 255, 0.92)',
-		borderRadius: 999,
-		paddingHorizontal: 12,
-		paddingVertical: 7,
-	},
-	footerBadgeText: {
-		color: '#111',
-		fontSize: 12,
-		fontWeight: '700',
-		letterSpacing: 0.4,
-	},
-	controlsRow: {
-		flexDirection: 'row',
-		gap: 8,
-		paddingHorizontal: 14,
-		paddingTop: 10,
-	},
-	controlButton: {
-		flex: 1,
-		flexDirection: 'row',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: 6,
-		paddingVertical: 11,
-		borderRadius: 16,
-		backgroundColor: '#fff',
-		borderWidth: 1,
-		borderColor: 'rgba(17, 24, 39, 0.08)',
-	},
-	controlButtonAccent: {
-		backgroundColor: '#e80000',
-		borderColor: '#e80000',
-	},
-	controlText: {
-		color: '#111',
-		fontSize: 12,
-		fontWeight: '800',
-	},
-	controlTextAccent: {
-		color: '#fff',
-	},
-	cardsRail: {
-		paddingHorizontal: 14,
-		paddingTop: 10,
-		paddingBottom: 18,
-		gap: 10,
-	},
-	expandButton: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		gap: 6,
-		paddingHorizontal: 12,
-		paddingVertical: 8,
-		borderRadius: 999,
-		backgroundColor: '#fff',
-		borderWidth: 1,
-		borderColor: 'rgba(17, 24, 39, 0.08)',
-	},
-	expandButtonText: {
-		fontSize: 12,
-		fontWeight: '800',
 		color: '#111',
 	},
 	expandedHint: {
@@ -1141,35 +947,5 @@ const styles = StyleSheet.create({
 		fontSize: 12,
 		color: '#666',
 		lineHeight: 17,
-	},
-	pointCard: {
-		width: 180,
-		backgroundColor: '#fff',
-		borderRadius: 18,
-		padding: 12,
-		borderWidth: 1,
-		borderColor: 'rgba(17, 24, 39, 0.08)',
-	},
-	pointCardActive: {
-		borderColor: '#e80000',
-	},
-	pointIcon: {
-		width: 36,
-		height: 36,
-		borderRadius: 18,
-		justifyContent: 'center',
-		alignItems: 'center',
-	},
-	pointTitle: {
-		marginTop: 10,
-		fontSize: 15,
-		fontWeight: '800',
-		color: '#111',
-	},
-	pointDescription: {
-		marginTop: 5,
-		fontSize: 12,
-		lineHeight: 17,
-		color: '#666',
 	},
 });
