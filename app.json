@@ -8,6 +8,14 @@
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
+    ],
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Permite tomar fotos para reportar obstáculos al rerutear."
+        }
+      ]
     ]
   }
 }

@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -15,10 +16,14 @@ import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 
 import { ACCESSIBLE_POINTS, AccessiblePoint } from '@/constants/accessiblePoints';
 import { DEFAULT_REGION } from '@/constants/map';
+import ManualReportModal from '@/components/ManualReportModal';
+import ReroutePromptModal from '@/components/ReroutePromptModal';
+import ScreenShell from '@/components/screen-shell';
+import { describeRouteObstaclePhoto } from '@/services/imageDescription';
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
+import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
 import { parseMapCenter } from '@/utils/coordinates';
-import ScreenShell from '@/components/screen-shell';
 
 type MapScreenProps = {
 	bottomInset?: number;
@@ -27,6 +32,30 @@ type MapScreenProps = {
 };
 
 type ExpandedPanel = 'map' | 'search';
+
+type ActiveRouteTarget = LatLng & { label: string };
+
+function inferReportCategory(description: string): RouteReportCategory {
+	const text = description.toLowerCase();
+	if (text.includes('bloquead') || text.includes('cerrad') || text.includes('cerrado')) {
+		return 'ruta_bloqueada';
+	}
+
+	if (text.includes('obra') || text.includes('construcción') || text.includes('construccion')) {
+		return 'obra';
+	}
+
+	if (
+		text.includes('rampa') ||
+		text.includes('escalera') ||
+		text.includes('banqueta') ||
+		text.includes('accesib')
+	) {
+		return 'accesibilidad';
+	}
+
+	return 'obstaculo_vial';
+}
 
 function formatRouteSummary(distanceMeters: number, durationSeconds: number) {
 	const km = distanceMeters >= 1000 ? `${(distanceMeters / 1000).toFixed(1)} km` : `${Math.round(distanceMeters)} m`;
@@ -52,6 +81,13 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 	const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
 	const [isSearching, setIsSearching] = useState(false);
 	const [destination, setDestination] = useState<PlaceResult | null>(null);
+	const [activeRouteTarget, setActiveRouteTarget] = useState<ActiveRouteTarget | null>(null);
+	const [showRerouteModal, setShowRerouteModal] = useState(false);
+	const [isRerouteBusy, setIsRerouteBusy] = useState(false);
+	const [rerouteBusyMessage, setRerouteBusyMessage] = useState('Procesando…');
+	const [reportNotice, setReportNotice] = useState<string | null>(null);
+	const [showManualReportModal, setShowManualReportModal] = useState(false);
+	const [visionErrorHint, setVisionErrorHint] = useState<string | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const isExpanded = expanded ?? localExpanded;
@@ -60,6 +96,8 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		() => ACCESSIBLE_POINTS.find((point) => point.id === selectedPointId) ?? ACCESSIBLE_POINTS[0],
 		[selectedPointId],
 	);
+
+	const hasActiveRoute = routeCoordinates.length > 1 && activeRouteTarget != null;
 
 	useEffect(() => {
 		let isMounted = true;
@@ -123,7 +161,7 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 
 		setIsSearching(true);
 		searchDebounceRef.current = setTimeout(() => {
-			void searchPlaces(trimmed)
+			void searchPlaces(trimmed, userLocation)
 				.then((results) => setSearchResults(results))
 				.finally(() => setIsSearching(false));
 		}, 350);
@@ -133,7 +171,7 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 				clearTimeout(searchDebounceRef.current);
 			}
 		};
-	}, [searchQuery]);
+	}, [searchQuery, userLocation]);
 
 	const centerOnUser = async () => {
 		const permission = await Location.getForegroundPermissionsAsync();
@@ -161,6 +199,14 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		setRegion(nextRegion);
 		mapRef.current?.animateToRegion(nextRegion, 700);
 	};
+
+	useEffect(() => {
+		if (!isExpanded || expandedPanel !== 'search' || userLocation || locationStatus === 'blocked') {
+			return;
+		}
+
+		void centerOnUser();
+	}, [isExpanded, expandedPanel, userLocation, locationStatus]);
 
 	const focusCoordinate = (latitude: number, longitude: number, delta = 0.04) => {
 		const nextRegion = {
@@ -206,7 +252,13 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		try {
 			const route = await fetchWalkingRoute(origin, target);
 			setRouteCoordinates(route.coordinates);
+			setActiveRouteTarget({
+				latitude: target.latitude,
+				longitude: target.longitude,
+				label,
+			});
 			setRouteSummary(`${label} · ${formatRouteSummary(route.distanceMeters, route.durationSeconds)}`);
+			setReportNotice(null);
 			setExpandedPanel('map');
 
 			if (route.coordinates.length > 1) {
@@ -240,6 +292,147 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 		}
 
 		setLocalExpanded((current) => !current);
+	};
+
+	const resolveUserLocation = async (): Promise<LatLng | null> => {
+		if (userLocation) {
+			return userLocation;
+		}
+
+		const permission = await Location.getForegroundPermissionsAsync();
+		if (permission.status !== 'granted') {
+			return null;
+		}
+
+		const currentLocation = await Location.getCurrentPositionAsync({
+			accuracy: Location.Accuracy.Balanced,
+		});
+
+		const coords = {
+			latitude: currentLocation.coords.latitude,
+			longitude: currentLocation.coords.longitude,
+		};
+		setUserLocation(coords);
+		return coords;
+	};
+
+	const performReroute = async () => {
+		if (!activeRouteTarget) {
+			return;
+		}
+
+		await centerOnUser();
+		await calculateRouteTo(
+			{ latitude: activeRouteTarget.latitude, longitude: activeRouteTarget.longitude },
+			activeRouteTarget.label,
+		);
+	};
+
+	const handleReroutePress = () => {
+		if (!hasActiveRoute) {
+			return;
+		}
+
+		setShowRerouteModal(true);
+	};
+
+	const closeRerouteModal = () => {
+		if (isRerouteBusy) {
+			return;
+		}
+
+		setShowRerouteModal(false);
+	};
+
+	const handleRerouteWithoutReport = async () => {
+		setShowRerouteModal(false);
+		setReportNotice('Recalculando ruta…');
+		await performReroute();
+	};
+
+	const saveReportAndReroute = async (description: string) => {
+		setRerouteBusyMessage('Guardando reporte…');
+		const coords = (await resolveUserLocation()) ?? {
+			latitude: region.latitude,
+			longitude: region.longitude,
+		};
+
+		const saved = await saveRouteReport({
+			category: inferReportCategory(description),
+			description,
+			latitude: coords.latitude,
+			longitude: coords.longitude,
+			routeDestinationLabel: activeRouteTarget?.label,
+		});
+
+		setReportNotice(`Reporte guardado (${saved.category}). Recalculando ruta…`);
+		setShowRerouteModal(false);
+		setShowManualReportModal(false);
+		setVisionErrorHint(null);
+		await performReroute();
+	};
+
+	const handleRerouteWithPhotoReport = async () => {
+		const permission = await ImagePicker.requestCameraPermissionsAsync();
+		if (!permission.granted) {
+			setRouteError('Se necesita permiso de cámara para reportar la razón del reruteo.');
+			setShowRerouteModal(false);
+			return;
+		}
+
+		const capture = await ImagePicker.launchCameraAsync({
+			mediaTypes: ['images'],
+			quality: 0.55,
+			base64: true,
+		});
+
+		const asset = capture.assets?.[0];
+		if (capture.canceled || !asset?.uri) {
+			return;
+		}
+
+		if (!asset.base64) {
+			setVisionErrorHint('No se pudo obtener la foto en base64. Intenta de nuevo o escribe el reporte.');
+			setShowRerouteModal(false);
+			setShowManualReportModal(true);
+			return;
+		}
+
+		setIsRerouteBusy(true);
+		setRerouteBusyMessage('Analizando foto (base64)…');
+
+		try {
+			const description = await describeRouteObstaclePhoto({
+				uri: asset.uri,
+				mimeType: asset.mimeType ?? 'image/jpeg',
+				base64: asset.base64,
+			});
+
+			await saveReportAndReroute(description);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'No se pudo analizar la foto.';
+			setVisionErrorHint(message);
+			setShowRerouteModal(false);
+			setShowManualReportModal(true);
+		} finally {
+			setIsRerouteBusy(false);
+			setRerouteBusyMessage('Procesando…');
+		}
+	};
+
+	const handleManualReportSubmit = async (description: string) => {
+		setIsRerouteBusy(true);
+		setRerouteBusyMessage('Guardando reporte…');
+
+		try {
+			await saveReportAndReroute(description);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'No se pudo guardar el reporte.';
+			setRouteError(message);
+		} finally {
+			setIsRerouteBusy(false);
+			setRerouteBusyMessage('Procesando…');
+		}
 	};
 
 	const activeLabel = destination?.name ?? selectedPoint.name;
@@ -318,10 +511,29 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 					</View>
 				)}
 
+				{reportNotice && !routeError && (
+					<View style={styles.routeBannerInfo}>
+						<MaterialCommunityIcons name="information-outline" size={18} color="#1d4ed8" />
+						<Text style={styles.routeBannerInfoText}>{reportNotice}</Text>
+					</View>
+				)}
+
 				{routeSummary && !routeError && (
-					<View style={styles.routeBanner}>
-						<MaterialCommunityIcons name="routes" size={18} color="#0f5132" />
-						<Text style={styles.routeBannerText}>{routeSummary}</Text>
+					<View style={styles.routeBannerBlock}>
+						<View style={styles.routeBanner}>
+							<MaterialCommunityIcons name="routes" size={18} color="#0f5132" />
+							<Text style={styles.routeBannerText}>{routeSummary}</Text>
+						</View>
+						{hasActiveRoute && (
+							<Pressable
+								style={styles.rerouteButton}
+								onPress={handleReroutePress}
+								disabled={isRouting || isRerouteBusy}
+							>
+								<MaterialCommunityIcons name="refresh" size={18} color="#fff" />
+								<Text style={styles.rerouteButtonText}>Rerutear</Text>
+							</Pressable>
+						)}
 					</View>
 				)}
 
@@ -424,7 +636,9 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 									<Text style={styles.searchEmpty}>
 										{searchQuery.trim()
 											? 'Sin resultados. Prueba con otro nombre o dirección.'
-											: 'Escribe para buscar lugares con OpenRouteService.'}
+											: userLocation
+												? 'Escribe para buscar lugares cerca de ti.'
+												: 'Escribe para buscar (activa ubicación para resultados cercanos).'}
 									</Text>
 								}
 								renderItem={({ item }) => (
@@ -513,6 +727,25 @@ export default function MapScreen({ bottomInset = 0, expanded, onToggleExpanded 
 					</View>
 				)}
 			</ScreenShell>
+
+			<ReroutePromptModal
+				visible={showRerouteModal}
+				isBusy={isRerouteBusy}
+				busyMessage={rerouteBusyMessage}
+				onConfirmReport={() => void handleRerouteWithPhotoReport()}
+				onSkipReport={() => void handleRerouteWithoutReport()}
+				onCancel={closeRerouteModal}
+			/>
+
+			<ManualReportModal
+				visible={showManualReportModal}
+				errorHint={visionErrorHint}
+				onSubmit={(text) => void handleManualReportSubmit(text)}
+				onCancel={() => {
+					setShowManualReportModal(false);
+					setVisionErrorHint(null);
+				}}
+			/>
 		</View>
 	);
 }
@@ -614,12 +847,15 @@ const styles = StyleSheet.create({
 		fontSize: 13,
 		lineHeight: 18,
 	},
+	routeBannerBlock: {
+		marginHorizontal: 14,
+		marginBottom: 8,
+		gap: 8,
+	},
 	routeBanner: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: 8,
-		marginHorizontal: 14,
-		marginBottom: 8,
 		paddingHorizontal: 12,
 		paddingVertical: 9,
 		borderRadius: 12,
@@ -632,6 +868,39 @@ const styles = StyleSheet.create({
 		color: '#0f5132',
 		fontSize: 12,
 		fontWeight: '700',
+	},
+	routeBannerInfo: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 8,
+		marginHorizontal: 14,
+		marginBottom: 8,
+		paddingHorizontal: 12,
+		paddingVertical: 9,
+		borderRadius: 12,
+		backgroundColor: '#dbeafe',
+		borderWidth: 1,
+		borderColor: '#93c5fd',
+	},
+	routeBannerInfoText: {
+		flex: 1,
+		color: '#1e3a8a',
+		fontSize: 12,
+		fontWeight: '600',
+	},
+	rerouteButton: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 8,
+		paddingVertical: 11,
+		borderRadius: 14,
+		backgroundColor: '#111',
+	},
+	rerouteButtonText: {
+		color: '#fff',
+		fontSize: 13,
+		fontWeight: '800',
 	},
 	routeBannerError: {
 		marginHorizontal: 14,

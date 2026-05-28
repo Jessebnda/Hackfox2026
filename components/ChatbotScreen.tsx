@@ -15,6 +15,7 @@ import {
 
 import ScreenShell from '@/components/screen-shell';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
+import { geminiGenerateText, getGeminiApiKey } from '@/services/geminiClient';
 
 type ChatbotScreenProps = {
 	bottomInset?: number;
@@ -42,6 +43,11 @@ const QUICK_PROMPTS = [
 	'Necesito una ruta accesible',
 	'Buscar puntos seguros',
 ];
+
+const FOX_SYSTEM_PROMPT = `Eres Fox, asistente virtual de Hackfox para movilidad accesible en Tijuana.
+Responde en español, breve y claro (máximo 3 oraciones).
+Ayuda con rutas accesibles, rampas, puntos seguros y uso del mapa de la app.
+Si piden mapa o ruta, sugiere abrir el mapa de la app.`;
 
 export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScreenProps) {
 	const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
@@ -87,6 +93,23 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 		router.push('/');
 	};
 
+	const replyWithLocalFallback = (content: string, shouldOpenMap: boolean) => {
+		const textToLower = content.toLowerCase();
+
+		if (shouldOpenMap) {
+			pushBotReply('Te muestro el mapa con los puntos accesibles más cercanos.', true);
+			openMap();
+			return;
+		}
+
+		if (textToLower.includes('hola') || textToLower.includes('buenas')) {
+			pushBotReply('Hola. Dime qué necesitas y te ayudo a ubicar rutas y lugares accesibles.');
+			return;
+		}
+
+		pushBotReply('Puedo revisar opciones en el mapa. Si quieres, pide una ruta accesible o un punto seguro.');
+	};
+
 	const handleSend = (messageText?: string) => {
 		const content = (messageText ?? inputText).trim();
 		if (!content) {
@@ -117,20 +140,24 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 			textToLower.includes('rampa') ||
 			textToLower.includes('segur');
 
-		typingTimeoutRef.current = setTimeout(() => {
-			if (shouldOpenMap) {
-				pushBotReply('Te muestro el mapa con los puntos accesibles más cercanos.', true);
-				openMap();
-				return;
+		const run = async () => {
+			if (getGeminiApiKey()) {
+				try {
+					const reply = await geminiGenerateText(content, FOX_SYSTEM_PROMPT);
+					pushBotReply(reply, shouldOpenMap);
+					if (shouldOpenMap) {
+						openMap();
+					}
+					return;
+				} catch {
+					// fallback local
+				}
 			}
 
-			if (textToLower.includes('hola') || textToLower.includes('buenas')) {
-				pushBotReply('Hola. Dime qué necesitas y te ayudo a ubicar rutas y lugares accesibles.');
-				return;
-			}
+			replyWithLocalFallback(content, shouldOpenMap);
+		};
 
-			pushBotReply('Puedo revisar opciones en el mapa. Si quieres, pide una ruta accesible o un punto seguro.');
-		}, 700);
+		void run();
 	};
 
 	const clearConversation = () => {
