@@ -7,6 +7,7 @@ import {
 	ActivityIndicator,
 	FlatList,
 	Pressable,
+	RefreshControl,
 	StyleSheet,
 	Text,
 	TextInput,
@@ -16,13 +17,17 @@ import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 
 import { ACCESSIBLE_POINTS, AccessiblePoint } from '@/constants/accessiblePoints';
 import { DEFAULT_REGION } from '@/constants/map';
+import AccessibilityPromptModal from '@/components/AccessibilityPromptModal';
+import AccessibilityWarningModal from '@/components/AccessibilityWarningModal';
 import ManualReportModal from '@/components/ManualReportModal';
 import ReroutePromptModal from '@/components/ReroutePromptModal';
 import ScreenShell from '@/components/screen-shell';
-import { describeRouteObstaclePhoto } from '@/services/imageDescription';
+import { AccessibilityResult, analyzeDestination } from '@/services/accessibilityAnalysis';
+import { ClasificarResult, describeRouteObstaclePhoto } from '@/services/imageDescription';
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
+import { Barrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
 import { parseMapCenter } from '@/utils/coordinates';
 
 type MapScreenProps = {
@@ -32,6 +37,12 @@ type MapScreenProps = {
 type ExpandedPanel = 'map' | 'search';
 
 type ActiveRouteTarget = LatLng & { label: string };
+
+function severityColor(severidad: 1 | 2 | 3): string {
+	if (severidad === 3) return '#dc2626';
+	if (severidad === 2) return '#f97316';
+	return '#f59e0b';
+}
 
 function inferReportCategory(description: string): RouteReportCategory {
 	const text = description.toLowerCase();
@@ -86,6 +97,14 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [showManualReportModal, setShowManualReportModal] = useState(false);
 	const [visionErrorHint, setVisionErrorHint] = useState<string | null>(null);
 	const [prefillDescription, setPrefillDescription] = useState<string | null>(null);
+	const [pendingBarreraData, setPendingBarreraData] = useState<(ClasificarResult & { photoUri: string }) | null>(null);
+	const [barreras, setBarreras] = useState<Barrera[]>([]);
+	const [isRefreshing, setIsRefreshing] = useState(false);
+	const [accessibilityResult, setAccessibilityResult] = useState<AccessibilityResult | null>(null);
+	const [showAccessibilityWarning, setShowAccessibilityWarning] = useState(false);
+	const [showAccessibilityPrompt, setShowAccessibilityPrompt] = useState(false);
+	const [isAnalyzingAccessibility, setIsAnalyzingAccessibility] = useState(false);
+	const [pendingAnalysisTarget, setPendingAnalysisTarget] = useState<{ lat: number; lng: number; label: string } | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -136,6 +155,31 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		};
 	}, []);
 
+	useEffect(() => {
+		void fetchBarreras()
+			.then((data) => {
+				setBarreras(data);
+				if (data.length === 0) {
+					// Cold start: retry once after 3 s
+					setTimeout(() => {
+						void fetchBarreras().then(setBarreras).catch(() => {});
+					}, 3000);
+				}
+			})
+			.catch(() => {
+				setTimeout(() => {
+					void fetchBarreras().then(setBarreras).catch(() => {});
+				}, 3000);
+			});
+	}, []);
+
+	const handleRefresh = () => {
+		setIsRefreshing(true);
+		void fetchBarreras()
+			.then(setBarreras)
+			.catch(() => {})
+			.finally(() => setIsRefreshing(false));
+	};
 
 	useEffect(() => {
 		if (searchDebounceRef.current) {
@@ -185,7 +229,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 			latitudeDelta: 0.08,
 			longitudeDelta: 0.08,
 		};
-
+                    
 		setRegion(nextRegion);
 		mapRef.current?.animateToRegion(nextRegion, 700);
 	};
@@ -240,7 +284,10 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 
 		setIsRouting(true);
 		try {
-			const route = await fetchWalkingRoute(origin, target);
+			const [route] = await Promise.all([
+				fetchWalkingRoute(origin, target),
+				fetchBarreras().then(setBarreras).catch(() => {}),
+			]);
 			setRouteCoordinates(route.coordinates);
 			setActiveRouteTarget({
 				latitude: target.latitude,
@@ -265,14 +312,49 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		}
 	};
 
+	const checkAccessibility = (lat: number, lng: number, label: string) => {
+		setPendingAnalysisTarget({ lat, lng, label });
+		setShowAccessibilityPrompt(true);
+	};
+
+	const runAccessibilityAnalysis = async () => {
+		if (!pendingAnalysisTarget) {
+			return;
+		}
+
+		const { lat, lng, label } = pendingAnalysisTarget;
+		setIsAnalyzingAccessibility(true);
+
+		try {
+			const result = await analyzeDestination(lat, lng, label);
+			if (!result.accesible) {
+				console.log(`[MapScreen] destino no accesible — mostrando advertencia para "${label}"`);
+				setAccessibilityResult(result);
+				setShowAccessibilityWarning(true);
+			} else {
+				console.log(`[MapScreen] destino accesible — sin advertencia para "${label}"`);
+			}
+		} catch (error) {
+			console.warn(`[MapScreen] análisis de accesibilidad falló para "${label}":`, error);
+		} finally {
+			setIsAnalyzingAccessibility(false);
+			setShowAccessibilityPrompt(false);
+			setPendingAnalysisTarget(null);
+		}
+	};
+
 	const handleSelectPlace = (place: PlaceResult) => {
 		setDestination(place);
 		setSearchQuery(place.name);
 		focusCoordinate(place.latitude, place.longitude);
-		void calculateRouteTo(
-			{ latitude: place.latitude, longitude: place.longitude },
-			place.name,
-		);
+
+		void (async () => {
+			await calculateRouteTo(
+				{ latitude: place.latitude, longitude: place.longitude },
+				place.name,
+			);
+			checkAccessibility(place.latitude, place.longitude, place.name);
+		})();
 	};
 
 	const resolveUserLocation = async (): Promise<LatLng | null> => {
@@ -346,6 +428,21 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 			routeDestinationLabel: activeRouteTarget?.label,
 		});
 
+		if (pendingBarreraData) {
+			void postBarrera({
+				lat: coords.latitude,
+				lng: coords.longitude,
+				tipo: pendingBarreraData.tipo,
+				severidad: pendingBarreraData.severidad,
+				descripcion: description,
+				foto_url: pendingBarreraData.photoUri,
+				calle_aprox: null,
+			})
+				.then(() => fetchBarreras().then(setBarreras))
+				.catch(() => {});
+			setPendingBarreraData(null);
+		}
+
 		setReportNotice(`Reporte guardado (${saved.category}). Recalculando ruta…`);
 		setShowRerouteModal(false);
 		setShowManualReportModal(false);
@@ -384,13 +481,14 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		setRerouteBusyMessage('Analizando foto (base64)…');
 
 		try {
-			const description = await describeRouteObstaclePhoto({
+			const result = await describeRouteObstaclePhoto({
 				uri: asset.uri,
 				mimeType: asset.mimeType ?? 'image/jpeg',
 				base64: asset.base64,
 			});
 
-			setPrefillDescription(description);
+			setPendingBarreraData({ ...result, photoUri: asset.uri });
+			setPrefillDescription(result.descripcion);
 			setShowRerouteModal(false);
 			setShowManualReportModal(true);
 		} catch (error) {
@@ -426,37 +524,34 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		<View style={styles.container}>
 			<StatusBar style="dark" />
 			<ScreenShell>
-				<View style={[styles.header, styles.headerCompact]}>
-				</View>
-
 				<View style={styles.expandedTabs}>
-						<Pressable
-							style={[styles.expandedTab, expandedPanel === 'map' && styles.expandedTabActive]}
-							onPress={() => setExpandedPanel('map')}
-						>
-							<MaterialCommunityIcons
-								name="map-outline"
-								size={16}
-								color={expandedPanel === 'map' ? '#e80000' : '#666'}
-							/>
-							<Text style={[styles.expandedTabText, expandedPanel === 'map' && styles.expandedTabTextActive]}>
-								Mapa
-							</Text>
-						</Pressable>
-						<Pressable
-							style={[styles.expandedTab, expandedPanel === 'search' && styles.expandedTabActive]}
-							onPress={() => setExpandedPanel('search')}
-						>
-							<MaterialCommunityIcons
-								name="magnify"
-								size={16}
-								color={expandedPanel === 'search' ? '#e80000' : '#666'}
-							/>
-							<Text style={[styles.expandedTabText, expandedPanel === 'search' && styles.expandedTabTextActive]}>
-								Buscar
-							</Text>
-						</Pressable>
-					</View>
+					<Pressable
+						style={[styles.expandedTab, expandedPanel === 'map' && styles.expandedTabActive]}
+						onPress={() => setExpandedPanel('map')}
+					>
+						<MaterialCommunityIcons
+							name="map-outline"
+							size={16}
+							color={expandedPanel === 'map' ? '#e80000' : '#666'}
+						/>
+						<Text style={[styles.expandedTabText, expandedPanel === 'map' && styles.expandedTabTextActive]}>
+							Mapa
+						</Text>
+					</Pressable>
+					<Pressable
+						style={[styles.expandedTab, expandedPanel === 'search' && styles.expandedTabActive]}
+						onPress={() => setExpandedPanel('search')}
+					>
+						<MaterialCommunityIcons
+							name="magnify"
+							size={16}
+							color={expandedPanel === 'search' ? '#e80000' : '#666'}
+						/>
+						<Text style={[styles.expandedTabText, expandedPanel === 'search' && styles.expandedTabTextActive]}>
+							Buscar
+						</Text>
+					</Pressable>
+				</View>
 
 				{locationStatus === 'blocked' && (
 					<View style={styles.banner}>
@@ -524,6 +619,21 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 								</Marker>
 							))}
 
+							{barreras.map((barrera) => (
+								<Marker
+									key={barrera.id}
+									coordinate={{ latitude: barrera.lat, longitude: barrera.lng }}
+									title={barrera.tipo.replace(/_/g, ' ')}
+									description={barrera.calle_aprox ?? barrera.descripcion}
+								>
+									<View style={styles.barrierMarkerWrap}>
+										<View style={[styles.barrierMarker, { backgroundColor: severityColor(barrera.severidad) }]}>
+											<MaterialCommunityIcons name="alert" size={13} color="#fff" />
+										</View>
+									</View>
+								</Marker>
+							))}
+
 							{destination && (
 								<Marker
 									coordinate={{
@@ -553,6 +663,11 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 							</View>
 						)}
 
+						<View style={styles.footerBadge}>
+							<Text style={styles.footerBadgeText}>
+								{routeCoordinates.length > 1 ? 'Ruta OpenRouteService' : 'Mapa accesible listo'}
+							</Text>
+						</View>
 					</View>
 				)}
 
@@ -586,6 +701,14 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 								data={searchResults}
 								keyExtractor={(item) => item.id}
 								keyboardShouldPersistTaps="handled"
+								refreshControl={
+									<RefreshControl
+										refreshing={isRefreshing}
+										onRefresh={handleRefresh}
+										tintColor="#e80000"
+										colors={['#e80000']}
+									/>
+								}
 								ListEmptyComponent={
 									<Text style={styles.searchEmpty}>
 										{searchQuery.trim()
@@ -626,10 +749,13 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 							style={styles.expandedRouteButton}
 							onPress={() => {
 								const target = destination ?? selectedPoint;
-								void calculateRouteTo(
-									{ latitude: target.latitude, longitude: target.longitude },
-									target.name,
-								);
+								void (async () => {
+									await calculateRouteTo(
+										{ latitude: target.latitude, longitude: target.longitude },
+										target.name,
+									);
+									checkAccessibility(target.latitude, target.longitude, target.name);
+								})();
 							}}
 							disabled={isRouting}
 						>
@@ -657,6 +783,31 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 					setShowManualReportModal(false);
 					setVisionErrorHint(null);
 					setPrefillDescription(null);
+					setPendingBarreraData(null);
+				}}
+			/>
+
+			<AccessibilityWarningModal
+				visible={showAccessibilityWarning}
+				result={accessibilityResult}
+				onContinue={() => setShowAccessibilityWarning(false)}
+				onCancel={() => {
+					setShowAccessibilityWarning(false);
+					setRouteCoordinates([]);
+					setRouteSummary(null);
+					setActiveRouteTarget(null);
+					setDestination(null);
+				}}
+			/>
+
+			<AccessibilityPromptModal
+				visible={showAccessibilityPrompt}
+				placeName={pendingAnalysisTarget?.label ?? ''}
+				isLoading={isAnalyzingAccessibility}
+				onConfirm={() => void runAccessibilityAnalysis()}
+				onSkip={() => {
+					setShowAccessibilityPrompt(false);
+					setPendingAnalysisTarget(null);
 				}}
 			/>
 		</View>
@@ -667,14 +818,6 @@ const styles = StyleSheet.create({
 	container: {
 		flex: 1,
 		backgroundColor: '#f4f4f4',
-	},
-	header: {
-		paddingHorizontal: 18,
-		paddingTop: 8,
-		paddingBottom: 8,
-		flexDirection: 'row',
-		alignItems: 'center',
-		justifyContent: 'space-between',
 	},
 	expandedTabs: {
 		flexDirection: 'row',
@@ -841,6 +984,21 @@ const styles = StyleSheet.create({
 		fontWeight: '700',
 		color: '#111',
 	},
+	footerBadge: {
+		position: 'absolute',
+		left: 14,
+		bottom: 14,
+		backgroundColor: 'rgba(255, 255, 255, 0.92)',
+		borderRadius: 999,
+		paddingHorizontal: 12,
+		paddingVertical: 7,
+	},
+	footerBadgeText: {
+		color: '#111',
+		fontSize: 12,
+		fontWeight: '700',
+		letterSpacing: 0.4,
+	},
 	expandedHint: {
 		flexDirection: 'row',
 		alignItems: 'center',
@@ -947,5 +1105,18 @@ const styles = StyleSheet.create({
 		fontSize: 12,
 		color: '#666',
 		lineHeight: 17,
+	},
+	barrierMarkerWrap: {
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	barrierMarker: {
+		width: 26,
+		height: 26,
+		borderRadius: 13,
+		justifyContent: 'center',
+		alignItems: 'center',
+		borderWidth: 2,
+		borderColor: '#fff',
 	},
 });
