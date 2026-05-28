@@ -9,5 +9,6 @@ RUN npm install
 COPY . .
 
 EXPOSE 8081
+EXPOSE 19000
 
-CMD ["npx", "expo", "start", "--web", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["npx", "expo", "start"]
