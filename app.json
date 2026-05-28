@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Hackfox2026",
+    "slug": "hackfox2026",
+    "scheme": "hackfox2026",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
