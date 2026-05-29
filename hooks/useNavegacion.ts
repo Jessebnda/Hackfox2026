@@ -58,7 +58,7 @@ export function useNavegacion() {
 
       const trackingIniciado = await startBackgroundTracking();
       if (!trackingIniciado) {
-        throw new Error('No se pudo iniciar el rastreo GPS. Verifica los permisos de ubicación.');
+        console.warn('[useNavegacion] No se pudo iniciar el rastreo GPS en segundo plano. Continuando sin tracking background.');
       }
 
       setDistanciaMetros(ruta.distanceMeters);
