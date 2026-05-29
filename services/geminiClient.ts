@@ -320,8 +320,6 @@ export async function geminiGenerateText(
 	userText: string,
 	systemInstruction: string,
 ): Promise<string> {
-	getGeminiApiKey();
-
 	const models = await listGeminiModels();
 	console.log('[Gemini] modelos a intentar:', models);
 	let lastError = 'Gemini no respondió.';
