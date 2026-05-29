@@ -52,16 +52,22 @@ export async function fetchWalkingRoute(
 
 	const avoidPolygons = await fetchRouteAvoidPolygons();
 
-	const body = {
+	const body: Record<string, unknown> = {
 		coordinates: [toOrsCoordinate(origin), toOrsCoordinate(destination)],
 		preference: 'recommended',
-		options: {
+	};
+
+	if (avoidPolygons.length > 0) {
+		body.options = {
 			avoid_polygons: {
 				type: 'MultiPolygon',
 				coordinates: avoidPolygons,
 			},
-		},
-	};
+		};
+		console.log(`[ORS] ruteo con ${avoidPolygons.length} zonas de evitación`);
+	} else {
+		console.log('[ORS] ruteo sin zonas de evitación');
+	}
 
 	const response = await fetch(`${ORS_BASE_URL}/v2/directions/foot-walking/geojson`, {
 		method: 'POST',

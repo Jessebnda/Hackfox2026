@@ -1,4 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -16,6 +18,8 @@ import {
 import ScreenShell from '@/components/screen-shell';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { geminiGenerateText, getGeminiApiKey } from '@/services/geminiClient';
+import { searchPlaces } from '@/services/placesSearch';
+import { detectarDestino } from '@/services/voiceDetector';
 
 type ChatbotScreenProps = {
 	bottomInset?: number;
@@ -49,13 +53,41 @@ Responde en español, breve y claro (máximo 3 oraciones).
 Ayuda con rutas accesibles, rampas, puntos seguros y uso del mapa de la app.
 Si piden mapa o ruta, sugiere abrir el mapa de la app.`;
 
+// Ordered longest-first so the most specific pattern matches first
+const DESTINATION_INTENTS = [
+	'quiero ir al ', 'quiero ir a ',
+	'llévame al ', 'llévame a ', 'llevame al ', 'llevame a ',
+	'cómo llego al ', 'cómo llego a ', 'como llego al ', 'como llego a ',
+	'dónde queda el ', 'dónde queda la ', 'dónde queda ',
+	'donde queda el ', 'donde queda la ', 'donde queda ',
+	'dónde está el ', 'dónde está la ', 'dónde está ',
+	'donde esta el ', 'donde esta la ', 'donde esta ',
+	'ruta al ', 'ruta a ',
+	'quiero visitar ', 'quiero comer en ', 'quiero comer ',
+	'quiero ir ', 'ir al ', 'ir a ',
+	'buscar ',
+];
+
+function extractPlaceName(text: string): string | null {
+	const lower = text.toLowerCase();
+	for (const intent of DESTINATION_INTENTS) {
+		const idx = lower.indexOf(intent);
+		if (idx !== -1) {
+			return text.slice(idx + intent.length).trim();
+		}
+	}
+	return null;
+}
+
 export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScreenProps) {
 	const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
 	const [inputText, setInputText] = useState('');
 	const [isTyping, setIsTyping] = useState(false);
+	const [isRecording, setIsRecording] = useState(false);
 	const [sessionTime] = useState(() => new Date());
 	const flatListRef = useRef<FlatList<Message>>(null);
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 	const router = useRouter();
 	const { keyboardInset, isKeyboardVisible } = useKeyboardInset(bottomInset);
 
@@ -141,13 +173,27 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 			textToLower.includes('segur');
 
 		const run = async () => {
+			// Destination detection via searchPlaces (independent of Gemini)
+			const placeName = extractPlaceName(content);
+			if (placeName) {
+				try {
+					const results = await searchPlaces(placeName, null);
+					if (results.length > 0) {
+						pushBotReply(`Llevándote al mapa para buscar "${results[0].name}".`);
+						router.push({ pathname: '/', params: { voiceDestino: results[0].name } });
+						return;
+					}
+				} catch {
+					// no match, continue to chat
+				}
+			}
+
+			// Normal chat response
 			if (getGeminiApiKey()) {
 				try {
 					const reply = await geminiGenerateText(content, FOX_SYSTEM_PROMPT);
 					pushBotReply(reply, shouldOpenMap);
-					if (shouldOpenMap) {
-						openMap();
-					}
+					if (shouldOpenMap) openMap();
 					return;
 				} catch {
 					// fallback local
@@ -158,6 +204,60 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 		};
 
 		void run();
+	};
+
+	const startRecording = async () => {
+		try {
+			const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+			console.log('[Voice] permiso micrófono:', granted);
+			if (!granted) return;
+
+			await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+			await audioRecorder.prepareToRecordAsync();
+			audioRecorder.record();
+			setIsRecording(true);
+			console.log('[Voice] grabación iniciada');
+		} catch (e) {
+			console.error('[Voice] error al iniciar grabación:', e);
+		}
+	};
+
+	const stopRecordingAndSend = async () => {
+		if (!isRecording) return;
+		setIsRecording(false);
+		setIsTyping(true);
+
+		try {
+			await audioRecorder.stop();
+			await setAudioModeAsync({ allowsRecording: false });
+
+			const uri = audioRecorder.uri;
+			console.log('[Voice] URI grabación:', uri);
+			if (!uri) throw new Error('Sin URI de grabación');
+
+			const base64 = await FileSystem.readAsStringAsync(uri, {
+				encoding: 'base64',
+			});
+			console.log('[Voice] base64 length:', base64.length);
+
+			console.log('[Voice] enviando a /detectar-destino...');
+			const result = await detectarDestino(base64, 'audio/mp4');
+			console.log('[Voice] respuesta:', JSON.stringify(result));
+			setIsTyping(false);
+
+			if (result.lugarDestino) {
+				pushBotReply(`Llevándote al mapa para buscar "${result.lugarDestino}".`);
+				router.push({ pathname: '/', params: { voiceDestino: result.lugarDestino } });
+			} else if (result.transcripcion?.trim()) {
+				handleSend(result.transcripcion.trim());
+			} else {
+				pushBotReply('No pude entender el audio. Intenta de nuevo.');
+			}
+		} catch (e) {
+			console.error('[Voice] error:', e);
+			setIsTyping(false);
+			pushBotReply('Error al procesar el audio. Intenta de nuevo.');
+		}
 	};
 
 	const clearConversation = () => {
@@ -253,24 +353,31 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					>
 					<TextInput
 						style={styles.input}
-						placeholder="Escribe aquí..."
-						placeholderTextColor="#8b8b8b"
+						placeholder={isRecording ? 'Grabando...' : 'Escribe aquí...'}
+						placeholderTextColor={isRecording ? '#e80000' : '#8b8b8b'}
 						value={inputText}
 						onChangeText={setInputText}
+						editable={!isRecording}
 						multiline
 						maxLength={500}
 					/>
-					<Pressable
-						style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-						onPress={() => handleSend()}
-						disabled={!inputText.trim()}
-					>
-						<MaterialCommunityIcons
-							name="send"
-							size={24}
-							color={inputText.trim() ? '#fff' : '#c7c7c7'}
-						/>
-					</Pressable>
+					{inputText.trim() && !isRecording ? (
+						<Pressable style={styles.sendButton} onPress={() => handleSend()}>
+							<MaterialCommunityIcons name="send" size={24} color="#fff" />
+						</Pressable>
+					) : (
+						<Pressable
+							style={[styles.sendButton, isRecording && styles.sendButtonRecording]}
+							onPressIn={startRecording}
+							onPressOut={stopRecordingAndSend}
+						>
+							<MaterialCommunityIcons
+								name={isRecording ? 'stop' : 'microphone'}
+								size={24}
+								color="#fff"
+							/>
+						</Pressable>
+					)}
 				</View>
 				</View>
 			</ScreenShell>
@@ -464,6 +571,9 @@ const styles = StyleSheet.create({
 	},
 	sendButtonDisabled: {
 		backgroundColor: '#e5e7eb',
+	},
+	sendButtonRecording: {
+		backgroundColor: '#b00000',
 	},
 	mapButton: {
 		flexDirection: 'row',
