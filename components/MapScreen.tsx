@@ -19,11 +19,13 @@ import { DEFAULT_REGION } from '@/constants/map';
 import ManualReportModal from '@/components/ManualReportModal';
 import ReroutePromptModal from '@/components/ReroutePromptModal';
 import ScreenShell from '@/components/screen-shell';
+import VozToggle from '@/components/voizToggle';
 import { describeRouteObstaclePhoto } from '@/services/imageDescription';
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
 import { parseMapCenter } from '@/utils/coordinates';
+import { useNavegacion } from '@/hooks/useNavegacion'; 
 
 type MapScreenProps = {
 	bottomInset?: number;
@@ -88,6 +90,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [prefillDescription, setPrefillDescription] = useState<string | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const { estaNavegando,iniciarNavegacion,cancelarNavegacion,} = useNavegacion();
 
 	const selectedPoint = useMemo(
 		() => ACCESSIBLE_POINTS.find((point) => point.id === selectedPointId) ?? ACCESSIBLE_POINTS[0],
@@ -220,6 +223,10 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		setRouteSummary(null);
 		setRouteCoordinates([]);
 
+		if (estaNavegando) {
+			await cancelarNavegacion();
+		}
+
 		let origin = userLocation;
 		if (!origin) {
 			const permission = await Location.getForegroundPermissionsAsync();
@@ -257,6 +264,9 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 					animated: true,
 				});
 			}
+
+			await iniciarNavegacion(origin, target);
+
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'No se pudo calcular la ruta.';
 			setRouteError(message);
@@ -427,6 +437,8 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 			<StatusBar style="dark" />
 			<ScreenShell>
 				<View style={[styles.header, styles.headerCompact]}>
+					{/* NUEVO: Toggle de voz en el header */}
+					<VozToggle />
 				</View>
 
 				<View style={styles.expandedTabs}>
@@ -948,4 +960,5 @@ const styles = StyleSheet.create({
 		color: '#666',
 		lineHeight: 17,
 	},
+	headerCompact: {},
 });

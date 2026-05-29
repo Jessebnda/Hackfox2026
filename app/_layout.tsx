@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import '../utils/background-location-task'; 
 
 export default function RootLayout() {
   return (
