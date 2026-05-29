@@ -47,37 +47,49 @@ T-guIA ataca esto en tres frentes:
 
 ## Arquitectura del sistema
 
-```architecture-beta
-    group gcp(cloud)[Google Cloud Platform]
-    group api(cloud)[API Layer] in gcp
-    group data(cloud)[Data] in gcp
-    group ai(cloud)[AI] in gcp
-    group maps(cloud)[Maps APIs] in gcp
-    group cicd(cloud)[CI/CD] in gcp
+```mermaid
+flowchart TB
+    subgraph Clients["Clientes"]
+        mobile["📱 App Móvil\nExpo React Native"]
+        dashboard["🖥️ Dashboard\nNext.js / Vercel"]
+    end
 
-    service mobile(internet)[App Movil Expo]
-    service dashboard(internet)[Dashboard Next.js Vercel]
+    subgraph GCP["☁️ Google Cloud Platform"]
+        subgraph CICD["CI/CD"]
+            cloudbuild["⚙️ Cloud Build"]
+            artifact["📦 Artifact Registry"]
+        end
 
-    service cloudrun(server)[Cloud Run t-guia-api] in api
-    service cloudsql(database)[Cloud SQL PostgreSQL] in data
-    service storage(disk)[Cloud Storage barrerashackfox] in data
-    service vertex(server)[Vertex AI Gemini 2.5 Flash] in ai
-    service places(server)[Places API] in maps
-    service directions(server)[Directions API] in maps
-    service streetview(server)[Street View Static] in maps
-    service artifact(disk)[Artifact Registry] in cicd
-    service cloudbuild(server)[Cloud Build] in cicd
+        subgraph API["API Layer"]
+            cloudrun["🚀 Cloud Run\nt-guia-api"]
+        end
 
-    mobile:R --> L:cloudrun
-    dashboard:R --> L:cloudrun
-    cloudrun:B --> T:cloudsql
-    cloudrun:R --> L:storage
-    cloudrun:R --> L:vertex
-    cloudrun:B --> T:places
-    cloudrun:B --> T:directions
-    cloudrun:B --> T:streetview
-    cloudbuild:R --> L:artifact
-    artifact:B --> T:cloudrun
+        subgraph Data["Data"]
+            cloudsql[("🗄️ Cloud SQL\nPostgreSQL")]
+            storage[("💾 Cloud Storage\nbarrerashackfox")]
+        end
+
+        subgraph AI["Inteligencia Artificial"]
+            vertex["🤖 Vertex AI\nGemini 2.5 Flash"]
+        end
+
+        subgraph Maps["Maps APIs"]
+            places["📍 Places API"]
+            directions["🗺️ Directions API"]
+            streetview["📷 Street View Static"]
+        end
+    end
+
+    mobile -->|HTTPS REST| cloudrun
+    dashboard -->|HTTPS REST| cloudrun
+    cloudrun --> cloudsql
+    cloudrun --> storage
+    cloudrun --> vertex
+    cloudrun --> places
+    cloudrun --> directions
+    cloudrun --> streetview
+    cloudbuild --> artifact
+    artifact -->|Deploy| cloudrun
 ```
 
 ### Flujo de datos detallado
