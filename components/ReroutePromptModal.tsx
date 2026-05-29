@@ -22,7 +22,7 @@ export default function ReroutePromptModal({
 		<Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
 			<View style={styles.overlay}>
 				<View style={styles.card}>
-					<Text style={styles.title}>Rerutear</Text>
+					<Text style={styles.title}>Reajustar ruta</Text>
 					<Text style={styles.message}>
 						¿Quieres marcar la razón del cambio? Puedes tomar una foto del obstáculo o situación en la vía.
 					</Text>
@@ -35,7 +35,7 @@ export default function ReroutePromptModal({
 					) : (
 						<View style={styles.actions}>
 							<Pressable style={[styles.button, styles.buttonSecondary]} onPress={onSkipReport}>
-								<Text style={styles.buttonSecondaryText}>No, solo rerutear</Text>
+								<Text style={styles.buttonSecondaryText}>No, solo reajustar</Text>
 							</Pressable>
 							<Pressable style={[styles.button, styles.buttonPrimary]} onPress={onConfirmReport}>
 								<Text style={styles.buttonPrimaryText}>Sí, tomar foto</Text>

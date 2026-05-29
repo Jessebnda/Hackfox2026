@@ -58,7 +58,7 @@ export default function ManualReportModal({
 							onPress={() => onSubmit(text.trim())}
 							disabled={!text.trim()}
 						>
-							<Text style={styles.buttonPrimaryText}>Guardar y rerutear</Text>
+							<Text style={styles.buttonPrimaryText}>Guardar y reajustar</Text>
 						</Pressable>
 					</View>
 				</View>

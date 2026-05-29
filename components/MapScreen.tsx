@@ -686,7 +686,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 								disabled={isRouting || isRerouteBusy}
 							>
 								<MaterialCommunityIcons name="refresh" size={18} color="#fff" />
-								<Text style={styles.rerouteButtonText}>Rerutear</Text>
+								<Text style={styles.rerouteButtonText}>Reajustar ruta</Text>
 							</Pressable>
 						)}
 					</View>

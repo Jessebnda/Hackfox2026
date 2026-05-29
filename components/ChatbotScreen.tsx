@@ -3,6 +3,7 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } fr
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import TypingDots from '@/components/ui/typing-dots';
 import {
 	ActivityIndicator,
 	FlatList,
@@ -22,6 +23,7 @@ import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { geminiGenerateText, getGeminiApiKey } from '@/services/geminiClient';
 import { searchPlaces } from '@/services/placesSearch';
 import { detectarDestino } from '@/services/voiceDetector';
+
 
 type ChatbotScreenProps = {
 	bottomInset?: number;
@@ -282,7 +284,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					<ActivityIndicator size="small" color="#e80000" />
 				</View>
 				<View style={styles.botBubble}>
-					<Text style={styles.botText}>Escribiendo...</Text>
+					<TypingDots color="#e80000" />
 				</View>
 			</View>
 		);
