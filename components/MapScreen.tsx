@@ -30,6 +30,7 @@ import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRoute
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
 import { Barrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
+import { registrarSesion } from '@/services/sesiones';
 import { parseMapCenter } from '@/utils/coordinates';
 import { useNavegacion } from '@/hooks/useNavegacion'; 
 
@@ -277,7 +278,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		focusCoordinate(point.latitude, point.longitude);
 	};
 
-	const calculateRouteTo = async (target: LatLng, label: string) => {
+	const calculateRouteTo = async (target: LatLng, label: string, placeId?: string) => {
 		setRouteError(null);
 		setRouteSummary(null);
 		setRouteCoordinates([]);
@@ -306,17 +307,21 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 
 		setIsRouting(true);
 		try {
+			let freshBarreras: Barrera[] = barreras;
 			const [route] = await Promise.all([
 				fetchWalkingRoute(origin, target),
-				fetchBarreras().then(setBarreras).catch(() => {}),
+				fetchBarreras()
+					.then((data) => { setBarreras(data); freshBarreras = data; })
+					.catch(() => {}),
 			]);
+			const summaryText = `${label} · ${formatRouteSummary(route.distanceMeters, route.durationSeconds)}`;
 			setRouteCoordinates(route.coordinates);
 			setActiveRouteTarget({
 				latitude: target.latitude,
 				longitude: target.longitude,
 				label,
 			});
-			setRouteSummary(`${label} · ${formatRouteSummary(route.distanceMeters, route.durationSeconds)}`);
+			setRouteSummary(summaryText);
 			setReportNotice(null);
 			setExpandedPanel('map');
 
@@ -326,6 +331,17 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 					animated: true,
 				});
 			}
+
+			void registrarSesion({
+				destino_texto: label,
+				destino_place_id: placeId ?? label,
+				destino_nombre: label,
+				origen_lat: origin.latitude,
+				origen_lng: origin.longitude,
+				ruta_elegida_idx: 0,
+				barreras_ruta_0: freshBarreras.map((b) => b.id),
+				explicacion: summaryText,
+			});
 
 			await iniciarNavegacion(origin, target);
 
@@ -377,6 +393,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 			await calculateRouteTo(
 				{ latitude: place.latitude, longitude: place.longitude },
 				place.name,
+				place.id,
 			);
 			checkAccessibility(place.latitude, place.longitude, place.name);
 		})();
@@ -413,6 +430,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		await calculateRouteTo(
 			{ latitude: activeRouteTarget.latitude, longitude: activeRouteTarget.longitude },
 			activeRouteTarget.label,
+			destination?.id,
 		);
 	};
 
@@ -782,6 +800,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 									await calculateRouteTo(
 										{ latitude: target.latitude, longitude: target.longitude },
 										target.name,
+										target.id,
 									);
 									checkAccessibility(target.latitude, target.longitude, target.name);
 								})();
