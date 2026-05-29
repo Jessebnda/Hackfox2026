@@ -11,4 +11,4 @@ COPY . .
 EXPOSE 8081
 EXPOSE 19000
 
-CMD ["npx", "expo", "start"]
+CMD ["npx", "expo", "start", "--offline"]
