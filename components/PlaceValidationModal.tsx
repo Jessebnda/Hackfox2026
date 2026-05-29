@@ -36,7 +36,7 @@ export default function PlaceValidationModal({
 							</View>
 							<Text style={styles.title}>Foto de comprobación</Text>
 							<Text style={styles.message}>
-								Toma una foto para validar que <Text style={styles.bold}>{placeName}</Text> está bien. Esto es un placeholder y siempre confirmará correctamente.
+								Toma una foto para validar que <Text style={styles.bold}>{placeName}</Text> está bien.
 							</Text>
 							<View style={styles.actions}>
 								<Pressable style={[styles.button, styles.buttonSecondary]} onPress={onCancel}>

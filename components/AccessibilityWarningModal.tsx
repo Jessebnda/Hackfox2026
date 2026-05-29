@@ -43,6 +43,10 @@ export default function AccessibilityWarningModal({ visible, result, onContinue,
 	}
 
 	const streetViewUrl = getStreetViewUrl(result.lat, result.lng);
+	const isAccessible = result.accesible;
+	const accentColor = isAccessible ? '#16a34a' : '#dc2626';
+	const badgeBg = isAccessible ? '#dcfce7' : '#fee2e2';
+	const badgeTextColor = isAccessible ? '#166534' : '#991b1b';
 
 	return (
 		<Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
@@ -50,14 +54,20 @@ export default function AccessibilityWarningModal({ visible, result, onContinue,
 				<View style={styles.card}>
 					<ScrollView showsVerticalScrollIndicator={false} bounces={false}>
 						<View style={styles.header}>
-							<MaterialCommunityIcons name="alert-circle" size={28} color="#dc2626" />
-							<Text style={styles.title}>Destino poco accesible</Text>
+							<MaterialCommunityIcons
+								name={isAccessible ? 'check-circle' : 'alert-circle'}
+								size={28}
+								color={accentColor}
+							/>
+							<Text style={[styles.title, { color: accentColor }]}>
+								{isAccessible ? 'Destino accesible' : 'Destino poco accesible'}
+							</Text>
 						</View>
 
 						<Text style={styles.placeName}>{result.lugar}</Text>
 
-						<View style={styles.scoreBadge}>
-							<Text style={styles.scoreText}>
+						<View style={[styles.scoreBadge, { backgroundColor: badgeBg }]}>
+							<Text style={[styles.scoreText, { color: badgeTextColor }]}>
 								Puntaje: {result.puntaje}/{result.puntaje_max}
 							</Text>
 						</View>

@@ -408,14 +408,9 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 
 		try {
 			const result = await analyzeDestination(lat, lng, label);
-			if (!result.accesible) {
-				console.log(`[MapScreen] destino no accesible — mostrando advertencia para "${label}"`);
-				setAccessibilityResult(result);
-				setShowAccessibilityWarning(true);
-			} else {
-				console.log(`[MapScreen] destino accesible — sin advertencia para "${label}"`);
-				setReportNotice(`"${label}" se confirmó como accesible.`);
-			}
+			console.log(`[MapScreen] mostrando resultado de accesibilidad para "${label}" (accesible=${result.accesible})`);
+			setAccessibilityResult(result);
+			setShowAccessibilityWarning(true);
 		} catch (error) {
 			console.warn(`[MapScreen] análisis de accesibilidad falló para "${label}":`, error);
 		} finally {
