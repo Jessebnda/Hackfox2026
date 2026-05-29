@@ -20,7 +20,6 @@ import { ACCESSIBLE_POINTS, AccessiblePoint } from '@/constants/accessiblePoints
 import { DEFAULT_REGION } from '@/constants/map';
 import AccessibilityPromptModal from '@/components/AccessibilityPromptModal';
 import AccessibilityWarningModal from '@/components/AccessibilityWarningModal';
-import BarrierDeleteModal from '@/components/BarrierDeleteModal';
 import ManualReportModal from '@/components/ManualReportModal';
 import PlaceValidationModal from './PlaceValidationModal';
 import ReroutePromptModal from '@/components/ReroutePromptModal';
@@ -31,7 +30,7 @@ import { ClasificarResult, describeRouteObstaclePhoto } from '@/services/imageDe
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
-import { Barrera, deleteBarrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
+import { Barrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
 import { parseMapCenter } from '@/utils/coordinates';
 import { useNavegacion } from '@/hooks/useNavegacion'; 
 
@@ -128,9 +127,6 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [showPlaceValidationModal, setShowPlaceValidationModal] = useState(false);
 	const [isPlaceValidationBusy, setIsPlaceValidationBusy] = useState(false);
 	const [pendingPlaceValidation, setPendingPlaceValidation] = useState<AccessiblePoint | null>(null);
-	const [showBarrierDeleteModal, setShowBarrierDeleteModal] = useState(false);
-	const [isBarrierDeleteBusy, setIsBarrierDeleteBusy] = useState(false);
-	const [pendingBarrierDelete, setPendingBarrierDelete] = useState<Barrera | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const { estaNavegando,iniciarNavegacion,cancelarNavegacion,} = useNavegacion();
@@ -607,31 +603,6 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		}
 	};
 
-	const openBarrierDeleteModal = (barrera: Barrera) => {
-		setPendingBarrierDelete(barrera);
-		setShowBarrierDeleteModal(true);
-	};
-
-	const handleDeleteBarrier = async () => {
-		if (!pendingBarrierDelete) {
-			return;
-		}
-
-		setIsBarrierDeleteBusy(true);
-		try {
-			await deleteBarrera(pendingBarrierDelete.id);
-			setBarreras((currentBarreras) => currentBarreras.filter((barrera) => barrera.id !== pendingBarrierDelete.id));
-			setReportNotice(`Se borró la barrera: ${pendingBarrierDelete.tipo.replace(/_/g, ' ')}`);
-			setShowBarrierDeleteModal(false);
-			setPendingBarrierDelete(null);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'No se pudo borrar la barrera.';
-			setRouteError(message);
-		} finally {
-			setIsBarrierDeleteBusy(false);
-		}
-	};
-
 	const activeLabel = destination?.name ?? selectedPoint.name;
 
 	return (
@@ -754,7 +725,6 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 									coordinate={{ latitude: barrera.lat, longitude: barrera.lng }}
 									title={barrera.tipo.replace(/_/g, ' ')}
 									description={barrera.calle_aprox ?? barrera.descripcion}
-									onPress={() => openBarrierDeleteModal(barrera)}
 								>
 									<View style={styles.barrierMarkerWrap}>
 										<View style={[styles.barrierMarker, { backgroundColor: severityColor(barrera.severidad) }]}>
@@ -793,11 +763,11 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 							</View>
 						)}
 
-						<View style={styles.footerBadge}>
-							<Text style={styles.footerBadgeText}>
-								{routeCoordinates.length > 1 ? 'Ruta OpenRouteService' : 'Mapa accesible listo'}
-							</Text>
-						</View>
+						{routeCoordinates.length > 1 && (
+							<View style={styles.footerBadge}>
+								<Text style={styles.footerBadgeText}>Ruta OpenRouteService</Text>
+							</View>
+						)}
 					</View>
 				)}
 
@@ -949,17 +919,6 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 				onCancel={() => {
 					setShowPlaceValidationModal(false);
 					setPendingPlaceValidation(null);
-				}}
-			/>
-
-			<BarrierDeleteModal
-				visible={showBarrierDeleteModal}
-				barrierTitle={pendingBarrierDelete?.tipo.replace(/_/g, ' ') ?? ''}
-				barrierDescription={pendingBarrierDelete?.calle_aprox ?? pendingBarrierDelete?.descripcion ?? ''}
-				onDelete={() => void handleDeleteBarrier()}
-				onCancel={() => {
-					setShowBarrierDeleteModal(false);
-					setPendingBarrierDelete(null);
 				}}
 			/>
 		</View>
