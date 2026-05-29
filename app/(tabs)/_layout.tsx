@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
-import { Platform } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { Platform, Pressable } from "react-native";
 import { SvgXml } from "react-native-svg";
 
 const TGUIA_LOGO = `<svg viewBox="0 0 240 70" xmlns="http://www.w3.org/2000/svg">
@@ -21,6 +21,7 @@ const TGUIA_LOGO = `<svg viewBox="0 0 240 70" xmlns="http://www.w3.org/2000/svg"
 </svg>`;
 
 export default function TabsLayout() {
+  const router = useRouter();
   return (
     <Tabs
       screenOptions={() => ({
@@ -32,7 +33,9 @@ export default function TabsLayout() {
         },
         headerTitleAlign: 'left',
         headerTitle: () => (
-          <SvgXml xml={TGUIA_LOGO} width={138} height={40} style={{ marginLeft: 4 }} />
+          <Pressable onPress={() => router.navigate('/(tabs)/')} style={{ marginLeft: 4 }}>
+            <SvgXml xml={TGUIA_LOGO} width={138} height={40} />
+          </Pressable>
         ),
         tabBarActiveTintColor: '#e80000',
         tabBarInactiveTintColor: '#6b7280',
