@@ -6,6 +6,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
 	ActivityIndicator,
 	FlatList,
+	KeyboardAvoidingView,
+	Platform,
 	Pressable,
 	SafeAreaView,
 	ScrollView,
@@ -37,7 +39,7 @@ type Message = {
 
 const WELCOME_MESSAGE: Message = {
 	id: 'welcome',
-	text: 'Hola, soy Fox. Puedo ayudarte a encontrar rutas y puntos de apoyo accesibles.',
+	text: 'Hola, soy T-bot. Puedo ayudarte a encontrar rutas y puntos de apoyo accesibles.',
 	isUser: false,
 	timestamp: new Date(),
 };
@@ -48,7 +50,7 @@ const QUICK_PROMPTS = [
 	'Buscar puntos seguros',
 ];
 
-const FOX_SYSTEM_PROMPT = `Eres Fox, asistente virtual de Hackfox para movilidad accesible en Tijuana.
+const FOX_SYSTEM_PROMPT = `Eres T-bot, asistente virtual de t-guIA para movilidad accesible en Tijuana.
 Responde en español, breve y claro (máximo 3 oraciones).
 Ayuda con rutas accesibles, rampas, puntos seguros y uso del mapa de la app.
 Si piden mapa o ruta, sugiere abrir el mapa de la app.`;
@@ -89,7 +91,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 	const router = useRouter();
-	const { keyboardInset, isKeyboardVisible } = useKeyboardInset(bottomInset);
+	const { isKeyboardVisible } = useKeyboardInset(bottomInset);
 
 	useEffect(() => {
 		return () => {
@@ -289,6 +291,11 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 	return (
 		<SafeAreaView style={styles.container}>
 			<ScreenShell>
+				<KeyboardAvoidingView
+					style={{ flex: 1 }}
+					behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+					keyboardVerticalOffset={90}
+				>
 				<View style={styles.keyboardView}>
 					<View style={styles.header}>
 					<Pressable style={styles.newChatButton} onPress={clearConversation}>
@@ -301,7 +308,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 						<MaterialCommunityIcons name="robot" size={40} color="#e80000" />
 					</View>
 					<View style={styles.botTextContainer}>
-						<Text style={styles.botName}>Fox - <Text style={styles.botRole}>Asistente Virtual</Text></Text>
+						<Text style={styles.botName}>T-bot</Text>
 						<Text style={styles.chatStartTime}>Chat iniciado {formatTime(sessionTime)}</Text>
 					</View>
 				</View>
@@ -322,7 +329,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					keyExtractor={(item) => item.id}
 					contentContainerStyle={[
 						styles.messagesList,
-						{ paddingBottom: isKeyboardVisible ? keyboardInset + 8 : 18 + bottomInset },
+						{ paddingBottom: isKeyboardVisible ? 8 : 18 + bottomInset },
 					]}
 					renderItem={({ item }) => (
 						<View style={[styles.messageContainer, item.isUser ? styles.userMessage : styles.botMessage]}>
@@ -348,7 +355,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					<View
 						style={[
 							styles.inputContainer,
-							{ marginBottom: isKeyboardVisible ? keyboardInset : 16 + bottomInset },
+							{ marginBottom: isKeyboardVisible ? 8 : 16 + bottomInset },
 						]}
 					>
 					<TextInput
@@ -380,6 +387,7 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					)}
 				</View>
 				</View>
+				</KeyboardAvoidingView>
 			</ScreenShell>
 		</SafeAreaView>
 	);
