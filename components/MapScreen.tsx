@@ -1,6 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -107,6 +108,20 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [pendingAnalysisTarget, setPendingAnalysisTarget] = useState<{ lat: number; lng: number; label: string } | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const lastVoiceDestinoRef = useRef<string | undefined>(undefined);
+
+	const { voiceDestino } = useLocalSearchParams<{ voiceDestino?: string }>();
+
+	useEffect(() => {
+		if (!voiceDestino || voiceDestino === lastVoiceDestinoRef.current) return;
+		lastVoiceDestinoRef.current = voiceDestino;
+
+		void searchPlaces(voiceDestino, userLocation).then((results) => {
+			if (results.length > 0) {
+				handleSelectPlace(results[0]);
+			}
+		});
+	}, [voiceDestino, userLocation]);
 
 	const selectedPoint = useMemo(
 		() => ACCESSIBLE_POINTS.find((point) => point.id === selectedPointId) ?? ACCESSIBLE_POINTS[0],

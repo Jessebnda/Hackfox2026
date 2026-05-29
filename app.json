@@ -15,7 +15,27 @@
         {
           "cameraPermission": "Permite tomar fotos para reportar obstáculos al rerutear."
         }
-      ]
-    ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permite grabar audio para buscar rutas accesibles por voz."
+        }
+      ],
+      "expo-router"
+    ],
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.jpdessens.hackfox2026"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f230e11c-7c77-4d9f-a6f0-039891ae1619"
+      }
+    },
+    "owner": "jpdessens"
   }
 }

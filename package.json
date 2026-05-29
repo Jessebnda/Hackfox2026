@@ -11,14 +11,16 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
-    "expo": "54.0.2",
+    "babel-preset-expo": "~54.0.10",
+    "expo": "~54.0.35",
+    "expo-audio": "~1.1.1",
     "expo-constants": "~18.0.13",
-    "expo-file-system": "~19.0.22",
+    "expo-file-system": "~19.0.23",
     "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-linking": "~8.0.12",
     "expo-location": "~19.0.8",
-    "expo-router": "~6.0.23",
+    "expo-router": "~6.0.24",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -28,7 +30,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "babel-preset-expo": "~12.0.0",
     "typescript": "^5.9.3"
   }
 }
