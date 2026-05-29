@@ -23,6 +23,7 @@ import AccessibilityWarningModal from '@/components/AccessibilityWarningModal';
 import ManualReportModal from '@/components/ManualReportModal';
 import ReroutePromptModal from '@/components/ReroutePromptModal';
 import ScreenShell from '@/components/screen-shell';
+import VozToggle from '@/components/voizToggle';
 import { AccessibilityResult, analyzeDestination } from '@/services/accessibilityAnalysis';
 import { ClasificarResult, describeRouteObstaclePhoto } from '@/services/imageDescription';
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
@@ -30,6 +31,7 @@ import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
 import { Barrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
 import { parseMapCenter } from '@/utils/coordinates';
+import { useNavegacion } from '@/hooks/useNavegacion'; 
 
 type MapScreenProps = {
 	bottomInset?: number;
@@ -108,6 +110,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [pendingAnalysisTarget, setPendingAnalysisTarget] = useState<{ lat: number; lng: number; label: string } | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const { estaNavegando,iniciarNavegacion,cancelarNavegacion,} = useNavegacion();
 	const lastVoiceDestinoRef = useRef<string | undefined>(undefined);
 
 	const { voiceDestino } = useLocalSearchParams<{ voiceDestino?: string }>();
@@ -279,6 +282,10 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		setRouteSummary(null);
 		setRouteCoordinates([]);
 
+		if (estaNavegando) {
+			await cancelarNavegacion();
+		}
+
 		let origin = userLocation;
 		if (!origin) {
 			const permission = await Location.getForegroundPermissionsAsync();
@@ -319,6 +326,9 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 					animated: true,
 				});
 			}
+
+			await iniciarNavegacion(origin, target);
+
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'No se pudo calcular la ruta.';
 			setRouteError(message);
@@ -539,6 +549,10 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		<View style={styles.container}>
 			<StatusBar style="dark" />
 			<ScreenShell>
+				<View style={styles.voiceToggleContainer}>
+					{/* NUEVO: Toggle de voz en el header */}
+					<VozToggle />
+				</View>
 				<View style={styles.expandedTabs}>
 					<Pressable
 						style={[styles.expandedTab, expandedPanel === 'map' && styles.expandedTabActive]}
@@ -1120,6 +1134,10 @@ const styles = StyleSheet.create({
 		fontSize: 12,
 		color: '#666',
 		lineHeight: 17,
+	},
+	voiceToggleContainer: {
+		alignItems: 'flex-end',
+		marginBottom: 8,
 	},
 	barrierMarkerWrap: {
 		alignItems: 'center',
