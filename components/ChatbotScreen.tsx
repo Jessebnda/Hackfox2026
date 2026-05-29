@@ -11,6 +11,8 @@ import {
 	Text,
 	TextInput,
 	View,
+	KeyboardAvoidingView,
+	Platform,
 } from 'react-native';
 
 import ScreenShell from '@/components/screen-shell';
@@ -33,7 +35,7 @@ type Message = {
 
 const WELCOME_MESSAGE: Message = {
 	id: 'welcome',
-	text: 'Hola, soy Fox. Puedo ayudarte a encontrar rutas y puntos de apoyo accesibles.',
+	text: 'Hola, soy T-bot. Puedo ayudarte a encontrar rutas y puntos de apoyo accesibles.',
 	isUser: false,
 	timestamp: new Date(),
 };
@@ -44,7 +46,7 @@ const QUICK_PROMPTS = [
 	'Buscar puntos seguros',
 ];
 
-const FOX_SYSTEM_PROMPT = `Eres Fox, asistente virtual de Hackfox para movilidad accesible en Tijuana.
+const FOX_SYSTEM_PROMPT = `Eres T-bot, asistente virtual de Hackfox para movilidad accesible en Tijuana.
 Responde en español, breve y claro (máximo 3 oraciones).
 Ayuda con rutas accesibles, rampas, puntos seguros y uso del mapa de la app.
 Si piden mapa o ruta, sugiere abrir el mapa de la app.`;
@@ -186,93 +188,111 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 		);
 	}, [isTyping]);
 
+	// Scroll to end immediately when keyboard opens to avoid visual gap
+	useEffect(() => {
+		if (isKeyboardVisible) {
+			// small delay to allow layout to adjust
+			const id = setTimeout(() => {
+				flatListRef.current?.scrollToEnd({ animated: true });
+			}, 50);
+
+			return () => clearTimeout(id);
+		}
+	}, [isKeyboardVisible]);
+
 	return (
 		<SafeAreaView style={styles.container}>
 			<ScreenShell>
-				<View style={styles.keyboardView}>
+				<KeyboardAvoidingView
+					style={styles.keyboardView}
+					behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+					keyboardVerticalOffset={bottomInset}
+				>
 					<View style={styles.header}>
-					<Pressable style={styles.newChatButton} onPress={clearConversation}>
-						<MaterialCommunityIcons name="restart" size={24} color="#e80000" />
-					</Pressable>
-				</View>
+						<Pressable style={styles.newChatButton} onPress={clearConversation}>
+							<MaterialCommunityIcons name="restart" size={24} color="#e80000" />
+						</Pressable>
+					</View>
 
 					<View style={styles.botInfo}>
-					<View style={styles.botIconContainer}>
-						<MaterialCommunityIcons name="robot" size={40} color="#e80000" />
+						<View style={styles.botIconContainer}>
+							<MaterialCommunityIcons name="robot" size={40} color="#e80000" />
+						</View>
+						<View style={styles.botTextContainer}>
+							<Text style={styles.botName}>T-bot - <Text style={styles.botRole}>Asistente Virtual</Text></Text>
+							<Text style={styles.chatStartTime}>Chat iniciado {formatTime(sessionTime)}</Text>
+						</View>
 					</View>
-					<View style={styles.botTextContainer}>
-						<Text style={styles.botName}>Fox - <Text style={styles.botRole}>Asistente Virtual</Text></Text>
-						<Text style={styles.chatStartTime}>Chat iniciado {formatTime(sessionTime)}</Text>
-					</View>
-				</View>
 
 					<View style={styles.promptRail}>
-					<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptContent}>
-						{QUICK_PROMPTS.map((prompt) => (
-							<Pressable key={prompt} style={styles.promptChip} onPress={() => handleSend(prompt)}>
-								<Text style={styles.promptText}>{prompt}</Text>
-							</Pressable>
-						))}
-					</ScrollView>
-				</View>
+						<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.promptContent}>
+							{QUICK_PROMPTS.map((prompt) => (
+								<Pressable key={prompt} style={styles.promptChip} onPress={() => handleSend(prompt)}>
+									<Text style={styles.promptText}>{prompt}</Text>
+								</Pressable>
+							))}
+						</ScrollView>
+					</View>
 
 					<FlatList
-					ref={flatListRef}
-					data={messages}
-					keyExtractor={(item) => item.id}
-					contentContainerStyle={[
-						styles.messagesList,
-						{ paddingBottom: isKeyboardVisible ? keyboardInset + 8 : 18 + bottomInset },
-					]}
-					renderItem={({ item }) => (
-						<View style={[styles.messageContainer, item.isUser ? styles.userMessage : styles.botMessage]}>
-							<View style={[styles.messageBubble, item.isUser ? styles.userBubble : styles.botBubble]}>
-								<Text style={[styles.messageText, item.isUser ? styles.userText : styles.botText]}>
-									{item.text}
-								</Text>
-								{!item.isUser && item.showMapAction && (
+						ref={flatListRef}
+						data={messages}
+						keyExtractor={(item) => item.id}
+						contentContainerStyle={[
+							styles.messagesList,
+							{ paddingBottom: isKeyboardVisible ? keyboardInset + 8 : 18 + bottomInset },
+						]}
+						renderItem={({ item }) => (
+							<View style={[styles.messageContainer, item.isUser ? styles.userMessage : styles.botMessage]}>
+								<View style={[styles.messageBubble, item.isUser ? styles.userBubble : styles.botBubble]}>
+									<Text style={[styles.messageText, item.isUser ? styles.userText : styles.botText]}>
+										{item.text}
+									</Text>
+									{!item.isUser && item.showMapAction && (
 										<Pressable style={styles.mapButton} onPress={openMap}>
-										<MaterialCommunityIcons name="map-marker" size={18} color="#FFF" />
-										<Text style={styles.mapButtonText}>Abrir Mapa</Text>
-									</Pressable>
-								)}
+											<MaterialCommunityIcons name="map-marker" size={18} color="#FFF" />
+											<Text style={styles.mapButtonText}>Abrir Mapa</Text>
+										</Pressable>
+									)}
+								</View>
 							</View>
-						</View>
-					)}
-					ListFooterComponent={listFooter}
-					onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-					onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-					showsVerticalScrollIndicator={false}
-				/>
+						)}
+						ListFooterComponent={listFooter}
+						keyboardShouldPersistTaps="handled"
+						keyboardDismissMode="on-drag"
+						onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+						onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+						showsVerticalScrollIndicator={false}
+					/>
 
 					<View
 						style={[
 							styles.inputContainer,
-							{ marginBottom: isKeyboardVisible ? keyboardInset : 16 + bottomInset },
+							{ marginBottom: isKeyboardVisible ? 4 : 16 + bottomInset },
 						]}
 					>
-					<TextInput
-						style={styles.input}
-						placeholder="Escribe aquí..."
-						placeholderTextColor="#8b8b8b"
-						value={inputText}
-						onChangeText={setInputText}
-						multiline
-						maxLength={500}
-					/>
-					<Pressable
-						style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-						onPress={() => handleSend()}
-						disabled={!inputText.trim()}
-					>
-						<MaterialCommunityIcons
-							name="send"
-							size={24}
-							color={inputText.trim() ? '#fff' : '#c7c7c7'}
+						<TextInput
+							style={styles.input}
+							placeholder="Escribe aquí..."
+							placeholderTextColor="#8b8b8b"
+							value={inputText}
+							onChangeText={setInputText}
+							multiline
+							maxLength={500}
 						/>
-					</Pressable>
-				</View>
-				</View>
+						<Pressable
+							style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+							onPress={() => handleSend()}
+							disabled={!inputText.trim()}
+						>
+							<MaterialCommunityIcons
+								name="send"
+								size={24}
+								color={inputText.trim() ? '#fff' : '#c7c7c7'}
+							/>
+						</Pressable>
+					</View>
+				</KeyboardAvoidingView>
 			</ScreenShell>
 		</SafeAreaView>
 	);
@@ -442,6 +462,7 @@ const styles = StyleSheet.create({
 		elevation: 4,
 		marginBottom: 16,
 	},
+
 	input: {
 		flex: 1,
 		minHeight: 40,
