@@ -68,3 +68,18 @@ export async function postBarrera(input: {
 	}
 	console.log('[API] POST /barreras ok', body);
 }
+
+export async function deleteBarrera(id: string): Promise<void> {
+	console.log('[API] DELETE /barreras/%s', id);
+	const response = await fetch(`${API_BASE}/barreras/${id}`, {
+		method: 'DELETE',
+	});
+
+	if (!response.ok) {
+		const body = await response.json().catch(() => null);
+		console.error('[API] DELETE /barreras failed', response.status, body);
+		throw new Error(`Error al borrar barrera: ${response.status}`);
+	}
+
+	console.log('[API] DELETE /barreras ok', id);
+}

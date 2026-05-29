@@ -20,16 +20,18 @@ import { ACCESSIBLE_POINTS, AccessiblePoint } from '@/constants/accessiblePoints
 import { DEFAULT_REGION } from '@/constants/map';
 import AccessibilityPromptModal from '@/components/AccessibilityPromptModal';
 import AccessibilityWarningModal from '@/components/AccessibilityWarningModal';
+import BarrierDeleteModal from '@/components/BarrierDeleteModal';
 import ManualReportModal from '@/components/ManualReportModal';
+import PlaceValidationModal from './PlaceValidationModal';
 import ReroutePromptModal from '@/components/ReroutePromptModal';
 import ScreenShell from '@/components/screen-shell';
-import VozToggle from '@/components/voizToggle';
+import { useVozNavegacion } from '@/hooks/useVoizNavigation';
 import { AccessibilityResult, analyzeDestination } from '@/services/accessibilityAnalysis';
 import { ClasificarResult, describeRouteObstaclePhoto } from '@/services/imageDescription';
 import { fetchWalkingRoute, LatLng, RouteCoordinate } from '@/services/openRouteService';
 import { PlaceResult, searchPlaces } from '@/services/placesSearch';
 import { RouteReportCategory, saveRouteReport } from '@/services/routeReports';
-import { Barrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
+import { Barrera, deleteBarrera, fetchBarreras, postBarrera } from '@/services/routeAvoidances';
 import { registrarSesion } from '@/services/sesiones';
 import { parseMapCenter } from '@/utils/coordinates';
 import { useNavegacion } from '@/hooks/useNavegacion'; 
@@ -76,6 +78,20 @@ function formatRouteSummary(distanceMeters: number, durationSeconds: number) {
 	return `${km} · ~${minutes} min a pie`;
 }
 
+function distanceMeters(from: LatLng, to: LatLng) {
+	const earthRadius = 6371000;
+	const latDelta = ((to.latitude - from.latitude) * Math.PI) / 180;
+	const lonDelta = ((to.longitude - from.longitude) * Math.PI) / 180;
+	const fromLat = (from.latitude * Math.PI) / 180;
+	const toLat = (to.latitude * Math.PI) / 180;
+
+	const haversine =
+		Math.sin(latDelta / 2) ** 2 +
+		Math.cos(fromLat) * Math.cos(toLat) * Math.sin(lonDelta / 2) ** 2;
+
+	return 2 * earthRadius * Math.asin(Math.sqrt(haversine));
+}
+
 export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [region, setRegion] = useState<Region>(() => ({
 		...DEFAULT_REGION,
@@ -83,6 +99,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	}));
 	const [expandedPanel, setExpandedPanel] = useState<ExpandedPanel>('map');
 	const [selectedPointId, setSelectedPointId] = useState(ACCESSIBLE_POINTS[0].id);
+	const [visibleAccessiblePoints, setVisibleAccessiblePoints] = useState(ACCESSIBLE_POINTS);
 	const [locationStatus, setLocationStatus] = useState<'loading' | 'ready' | 'blocked'>('loading');
 	const [userLocation, setUserLocation] = useState<LatLng | null>(null);
 	const [routeCoordinates, setRouteCoordinates] = useState<RouteCoordinate[]>([]);
@@ -109,9 +126,16 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 	const [showAccessibilityPrompt, setShowAccessibilityPrompt] = useState(false);
 	const [isAnalyzingAccessibility, setIsAnalyzingAccessibility] = useState(false);
 	const [pendingAnalysisTarget, setPendingAnalysisTarget] = useState<{ lat: number; lng: number; label: string } | null>(null);
+	const [showPlaceValidationModal, setShowPlaceValidationModal] = useState(false);
+	const [isPlaceValidationBusy, setIsPlaceValidationBusy] = useState(false);
+	const [pendingPlaceValidation, setPendingPlaceValidation] = useState<AccessiblePoint | null>(null);
+	const [showBarrierDeleteModal, setShowBarrierDeleteModal] = useState(false);
+	const [isBarrierDeleteBusy, setIsBarrierDeleteBusy] = useState(false);
+	const [pendingBarrierDelete, setPendingBarrierDelete] = useState<Barrera | null>(null);
 	const mapRef = useRef<MapView>(null);
 	const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const { estaNavegando,iniciarNavegacion,cancelarNavegacion,} = useNavegacion();
+	const { vozActivada, toggleVoz, cargando: isVoiceLoading } = useVozNavegacion();
 	const lastVoiceDestinoRef = useRef<string | undefined>(undefined);
 
 	const { voiceDestino } = useLocalSearchParams<{ voiceDestino?: string }>();
@@ -121,16 +145,28 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		lastVoiceDestinoRef.current = voiceDestino;
 
 		void searchPlaces(voiceDestino, userLocation).then((results) => {
-			if (results.length > 0) {
-				handleSelectPlace(results[0]);
+			const filtered = results.filter(
+				(place) => place.source !== 'local' || visibleAccessiblePoints.some((point) => point.id === place.id),
+			);
+			if (filtered.length > 0) {
+				handleSelectPlace(filtered[0]);
 			}
 		});
-	}, [voiceDestino, userLocation]);
+	}, [voiceDestino, userLocation, visibleAccessiblePoints]);
 
 	const selectedPoint = useMemo(
-		() => ACCESSIBLE_POINTS.find((point) => point.id === selectedPointId) ?? ACCESSIBLE_POINTS[0],
-		[selectedPointId],
+		() => visibleAccessiblePoints.find((point) => point.id === selectedPointId) ?? visibleAccessiblePoints[0] ?? ACCESSIBLE_POINTS[0],
+		[selectedPointId, visibleAccessiblePoints],
 	);
+
+	useEffect(() => {
+		if (visibleAccessiblePoints.some((point) => point.id === selectedPointId)) {
+			return;
+		}
+
+		const nextSelected = visibleAccessiblePoints[0] ?? ACCESSIBLE_POINTS[0];
+		setSelectedPointId(nextSelected.id);
+	}, [selectedPointId, visibleAccessiblePoints]);
 
 	const hasActiveRoute = routeCoordinates.length > 1 && activeRouteTarget != null;
 
@@ -278,6 +314,14 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		focusCoordinate(point.latitude, point.longitude);
 	};
 
+	const handleAccessiblePointPress = (point: AccessiblePoint) => {
+		setPendingPlaceValidation(point);
+		setShowPlaceValidationModal(true);
+		return;
+
+		focusPoint(point);
+	};
+
 	const calculateRouteTo = async (target: LatLng, label: string, placeId?: string) => {
 		setRouteError(null);
 		setRouteSummary(null);
@@ -374,6 +418,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 				setShowAccessibilityWarning(true);
 			} else {
 				console.log(`[MapScreen] destino accesible — sin advertencia para "${label}"`);
+				setReportNotice(`"${label}" se confirmó como accesible.`);
 			}
 		} catch (error) {
 			console.warn(`[MapScreen] análisis de accesibilidad falló para "${label}":`, error);
@@ -561,16 +606,54 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 		}
 	};
 
+	const confirmPlaceValidation = async () => {
+		if (!pendingPlaceValidation) {
+			return;
+		}
+
+		setIsPlaceValidationBusy(true);
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 700));
+			setVisibleAccessiblePoints((currentPoints) => currentPoints.filter((point) => point.id !== pendingPlaceValidation.id));
+			setReportNotice(`"${pendingPlaceValidation.name}" se comprobó y se retiró del mapa.`);
+			setShowPlaceValidationModal(false);
+			setPendingPlaceValidation(null);
+		} finally {
+			setIsPlaceValidationBusy(false);
+		}
+	};
+
+	const openBarrierDeleteModal = (barrera: Barrera) => {
+		setPendingBarrierDelete(barrera);
+		setShowBarrierDeleteModal(true);
+	};
+
+	const handleDeleteBarrier = async () => {
+		if (!pendingBarrierDelete) {
+			return;
+		}
+
+		setIsBarrierDeleteBusy(true);
+		try {
+			await deleteBarrera(pendingBarrierDelete.id);
+			setBarreras((currentBarreras) => currentBarreras.filter((barrera) => barrera.id !== pendingBarrierDelete.id));
+			setReportNotice(`Se borró la barrera: ${pendingBarrierDelete.tipo.replace(/_/g, ' ')}`);
+			setShowBarrierDeleteModal(false);
+			setPendingBarrierDelete(null);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'No se pudo borrar la barrera.';
+			setRouteError(message);
+		} finally {
+			setIsBarrierDeleteBusy(false);
+		}
+	};
+
 	const activeLabel = destination?.name ?? selectedPoint.name;
 
 	return (
 		<View style={styles.container}>
 			<StatusBar style="dark" />
 			<ScreenShell>
-				<View style={styles.voiceToggleContainer}>
-					{/* NUEVO: Toggle de voz en el header */}
-					<VozToggle />
-				</View>
 				<View style={styles.expandedTabs}>
 					<Pressable
 						style={[styles.expandedTab, expandedPanel === 'map' && styles.expandedTabActive]}
@@ -640,6 +723,21 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 
 				{expandedPanel === 'map' && (
 					<View style={[styles.mapCard, styles.mapCardExpanded, { marginBottom: 8 }]}>
+						<Pressable
+							style={[styles.voiceMapButton, !vozActivada && styles.voiceMapButtonMuted]}
+							onPress={() => void toggleVoz()}
+							disabled={isVoiceLoading}
+						>
+							{isVoiceLoading ? (
+								<ActivityIndicator size="small" color="#111" />
+							) : (
+								<MaterialCommunityIcons
+									name={vozActivada ? 'volume-high' : 'volume-mute'}
+									size={18}
+									color={vozActivada ? '#111' : '#e80000'}
+								/>
+							)}
+						</Pressable>
 						<MapView
 							ref={mapRef}
 							style={[styles.map, styles.mapExpanded]}
@@ -650,13 +748,13 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 							showsUserLocation
 							showsMyLocationButton={false}
 						>
-							{ACCESSIBLE_POINTS.map((point) => (
+							{visibleAccessiblePoints.map((point) => (
 								<Marker
 									key={point.id}
 									coordinate={{ latitude: point.latitude, longitude: point.longitude }}
 									title={point.name}
 									description={point.description}
-									onPress={() => focusPoint(point)}
+									onPress={() => handleAccessiblePointPress(point)}
 								>
 									<View style={styles.markerWrap}>
 										<View style={[styles.marker, { backgroundColor: point.accent }]}>
@@ -672,6 +770,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 									coordinate={{ latitude: barrera.lat, longitude: barrera.lng }}
 									title={barrera.tipo.replace(/_/g, ' ')}
 									description={barrera.calle_aprox ?? barrera.descripcion}
+									onPress={() => openBarrierDeleteModal(barrera)}
 								>
 									<View style={styles.barrierMarkerWrap}>
 										<View style={[styles.barrierMarker, { backgroundColor: severityColor(barrera.severidad) }]}>
@@ -856,6 +955,28 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 				onSkip={() => {
 					setShowAccessibilityPrompt(false);
 					setPendingAnalysisTarget(null);
+				}}
+			/>
+
+			<PlaceValidationModal
+				visible={showPlaceValidationModal}
+				placeName={pendingPlaceValidation?.name ?? ''}
+				isLoading={isPlaceValidationBusy}
+				onConfirm={() => void confirmPlaceValidation()}
+				onCancel={() => {
+					setShowPlaceValidationModal(false);
+					setPendingPlaceValidation(null);
+				}}
+			/>
+
+			<BarrierDeleteModal
+				visible={showBarrierDeleteModal}
+				barrierTitle={pendingBarrierDelete?.tipo.replace(/_/g, ' ') ?? ''}
+				barrierDescription={pendingBarrierDelete?.calle_aprox ?? pendingBarrierDelete?.descripcion ?? ''}
+				onDelete={() => void handleDeleteBarrier()}
+				onCancel={() => {
+					setShowBarrierDeleteModal(false);
+					setPendingBarrierDelete(null);
 				}}
 			/>
 		</View>
@@ -1154,9 +1275,28 @@ const styles = StyleSheet.create({
 		color: '#666',
 		lineHeight: 17,
 	},
-	voiceToggleContainer: {
-		alignItems: 'flex-end',
-		marginBottom: 8,
+	voiceMapButton: {
+		position: 'absolute',
+		top: 14,
+		right: 14,
+		zIndex: 5,
+		width: 40,
+		height: 40,
+		borderRadius: 20,
+		backgroundColor: 'rgba(255, 255, 255, 0.96)',
+		alignItems: 'center',
+		justifyContent: 'center',
+		borderWidth: 1,
+		borderColor: 'rgba(17, 24, 39, 0.08)',
+		shadowColor: '#000',
+		shadowOpacity: 0.12,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
+	voiceMapButtonMuted: {
+		borderColor: 'rgba(232, 0, 0, 0.28)',
+		backgroundColor: '#fff5f5',
 	},
 	barrierMarkerWrap: {
 		alignItems: 'center',
