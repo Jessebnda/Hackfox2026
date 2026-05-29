@@ -776,7 +776,7 @@ export default function MapScreen({ bottomInset = 0 }: MapScreenProps) {
 
 						{routeCoordinates.length > 1 && (
 							<View style={styles.footerBadge}>
-								<Text style={styles.footerBadgeText}>Ruta OpenRouteService</Text>
+								<Text style={styles.footerBadgeText}>Ruta calculada</Text>
 							</View>
 						)}
 					</View>

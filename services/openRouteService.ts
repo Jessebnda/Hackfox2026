@@ -139,74 +139,68 @@ export async function fetchWalkingRoute(
 	origin: LatLng,
 	destination: LatLng,
 ): Promise<{ coordinates: RouteCoordinate[]; distanceMeters: number; durationSeconds: number }> {
-	const apiKey = getApiKey();
-	if (!apiKey) {
-		throw new Error('Configura EXPO_PUBLIC_ORS_API_KEY en tu archivo .env');
-	}
-
 	const avoidPolygons = await fetchRouteAvoidPolygons();
 
-	const body: Record<string, unknown> = {
-		coordinates: [toOrsCoordinate(origin), toOrsCoordinate(destination)],
-		preference: 'recommended',
-	};
-
-	if (avoidPolygons.length > 0) {
-		body.options = {
-			avoid_polygons: {
-				type: 'MultiPolygon',
-				coordinates: avoidPolygons,
-			},
-		};
-		console.log(`[ORS] ruteo con ${avoidPolygons.length} zonas de evitación`);
-	} else {
-		console.log('[ORS] ruteo sin zonas de evitación');
-	}
-
+	// 1. Valhalla (primary)
 	try {
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 5000);
+		const result = await fetchWalkingRouteValhalla(origin, destination, avoidPolygons);
+		console.log('[Routing] Ruta obtenida via Valhalla ✅');
+		return result;
+	} catch (valhallaError) {
+		console.warn('[Valhalla] Falló, intentando ORS:', valhallaError);
+	}
 
-		const response = await fetch(`${ORS_BASE_URL}/v2/directions/foot-walking/geojson`, {
-			method: 'POST',
-			headers: {
-				Authorization: apiKey,
-				'Content-Type': 'application/json',
-				Accept: 'application/json, application/geo+json',
-			},
-			body: JSON.stringify(body),
-			signal: controller.signal,
-		});
-		clearTimeout(timeout);
-
-		const rawText = await response.text();
-		if (!response.ok || rawText.trimStart().startsWith('<')) {
-			throw new Error(`ORS status ${response.status}`);
-		}
-		const payload = JSON.parse(rawText) as OrsDirectionsResponse;
-
-		const feature = payload.features?.[0];
-		if (!feature?.geometry?.coordinates?.length) {
-			throw new Error('ORS no devolvió geometría.');
-		}
-
-		console.log('[Routing] Ruta obtenida via ORS ✅');
-		return {
-			coordinates: decodeLineString(feature.geometry.coordinates),
-			distanceMeters: feature.properties?.summary?.distance ?? 0,
-			durationSeconds: feature.properties?.summary?.duration ?? 0,
-		};
-	} catch (orsError) {
-		console.warn('[ORS] Falló, intentando Valhalla:', orsError);
+	// 2. ORS (fallback, solo si hay API key)
+	const apiKey = getApiKey();
+	if (apiKey) {
 		try {
-			const result = await fetchWalkingRouteValhalla(origin, destination, avoidPolygons);
-			console.log('[Routing] Ruta obtenida via Valhalla ✅');
-			return result;
-		} catch (valhallaError) {
-			console.warn('[Valhalla] Falló, usando OSRM (sin evitación):', valhallaError);
-			const result = await fetchWalkingRouteOSRM(origin, destination);
-			console.log('[Routing] Ruta obtenida via OSRM ✅');
-			return result;
+			const body: Record<string, unknown> = {
+				coordinates: [toOrsCoordinate(origin), toOrsCoordinate(destination)],
+				preference: 'recommended',
+			};
+			if (avoidPolygons.length > 0) {
+				body.options = {
+					avoid_polygons: { type: 'MultiPolygon', coordinates: avoidPolygons },
+				};
+				console.log(`[ORS] ruteo con ${avoidPolygons.length} zonas de evitación`);
+			}
+
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 5000);
+			const response = await fetch(`${ORS_BASE_URL}/v2/directions/foot-walking/geojson`, {
+				method: 'POST',
+				headers: {
+					Authorization: apiKey,
+					'Content-Type': 'application/json',
+					Accept: 'application/json, application/geo+json',
+				},
+				body: JSON.stringify(body),
+				signal: controller.signal,
+			});
+			clearTimeout(timeout);
+
+			const rawText = await response.text();
+			if (!response.ok || rawText.trimStart().startsWith('<')) {
+				throw new Error(`ORS status ${response.status}`);
+			}
+			const payload = JSON.parse(rawText) as OrsDirectionsResponse;
+			const feature = payload.features?.[0];
+			if (!feature?.geometry?.coordinates?.length) {
+				throw new Error('ORS no devolvió geometría.');
+			}
+			console.log('[Routing] Ruta obtenida via ORS ✅');
+			return {
+				coordinates: decodeLineString(feature.geometry.coordinates),
+				distanceMeters: feature.properties?.summary?.distance ?? 0,
+				durationSeconds: feature.properties?.summary?.duration ?? 0,
+			};
+		} catch (orsError) {
+			console.warn('[ORS] Falló, usando OSRM:', orsError);
 		}
 	}
+
+	// 3. OSRM (último recurso, sin zonas de evitación)
+	const result = await fetchWalkingRouteOSRM(origin, destination);
+	console.log('[Routing] Ruta obtenida via OSRM ✅');
+	return result;
 }

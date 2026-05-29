@@ -37,15 +37,28 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION"
       ],
       "package": "com.jpdessens.hackfox2026"
     },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "f230e11c-7c77-4d9f-a6f0-039891ae1619"
+        "projectId": "a412f1c3-6982-4dd7-a2bb-c11ba577953e"
       }
     },
-    "owner": "jpdessens"
+    "owner": "jesse05",
+    "updates": {
+      "url": "https://u.expo.dev/a412f1c3-6982-4dd7-a2bb-c11ba577953e"
+    },
+    "ios": {}
   }
 }
