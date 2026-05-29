@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,6 +18,7 @@ import {
 import ScreenShell from '@/components/screen-shell';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { geminiGenerateText, getGeminiApiKey } from '@/services/geminiClient';
+import { searchPlaces } from '@/services/placesSearch';
 import { detectarDestino } from '@/services/voiceDetector';
 
 type ChatbotScreenProps = {
@@ -51,6 +52,32 @@ const FOX_SYSTEM_PROMPT = `Eres Fox, asistente virtual de Hackfox para movilidad
 Responde en español, breve y claro (máximo 3 oraciones).
 Ayuda con rutas accesibles, rampas, puntos seguros y uso del mapa de la app.
 Si piden mapa o ruta, sugiere abrir el mapa de la app.`;
+
+// Ordered longest-first so the most specific pattern matches first
+const DESTINATION_INTENTS = [
+	'quiero ir al ', 'quiero ir a ',
+	'llévame al ', 'llévame a ', 'llevame al ', 'llevame a ',
+	'cómo llego al ', 'cómo llego a ', 'como llego al ', 'como llego a ',
+	'dónde queda el ', 'dónde queda la ', 'dónde queda ',
+	'donde queda el ', 'donde queda la ', 'donde queda ',
+	'dónde está el ', 'dónde está la ', 'dónde está ',
+	'donde esta el ', 'donde esta la ', 'donde esta ',
+	'ruta al ', 'ruta a ',
+	'quiero visitar ', 'quiero comer en ', 'quiero comer ',
+	'quiero ir ', 'ir al ', 'ir a ',
+	'buscar ',
+];
+
+function extractPlaceName(text: string): string | null {
+	const lower = text.toLowerCase();
+	for (const intent of DESTINATION_INTENTS) {
+		const idx = lower.indexOf(intent);
+		if (idx !== -1) {
+			return text.slice(idx + intent.length).trim();
+		}
+	}
+	return null;
+}
 
 export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScreenProps) {
 	const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
@@ -146,13 +173,27 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 			textToLower.includes('segur');
 
 		const run = async () => {
+			// Destination detection via searchPlaces (independent of Gemini)
+			const placeName = extractPlaceName(content);
+			if (placeName) {
+				try {
+					const results = await searchPlaces(placeName, null);
+					if (results.length > 0) {
+						pushBotReply(`Llevándote al mapa para buscar "${results[0].name}".`);
+						router.push({ pathname: '/', params: { voiceDestino: results[0].name } });
+						return;
+					}
+				} catch {
+					// no match, continue to chat
+				}
+			}
+
+			// Normal chat response
 			if (getGeminiApiKey()) {
 				try {
 					const reply = await geminiGenerateText(content, FOX_SYSTEM_PROMPT);
 					pushBotReply(reply, shouldOpenMap);
-					if (shouldOpenMap) {
-						openMap();
-					}
+					if (shouldOpenMap) openMap();
 					return;
 				} catch {
 					// fallback local
@@ -168,14 +209,16 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 	const startRecording = async () => {
 		try {
 			const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+			console.log('[Voice] permiso micrófono:', granted);
 			if (!granted) return;
 
 			await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
 			await audioRecorder.prepareToRecordAsync();
 			audioRecorder.record();
 			setIsRecording(true);
-		} catch {
-			// silently ignore if mic not available
+			console.log('[Voice] grabación iniciada');
+		} catch (e) {
+			console.error('[Voice] error al iniciar grabación:', e);
 		}
 	};
 
@@ -189,22 +232,29 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 			await setAudioModeAsync({ allowsRecording: false });
 
 			const uri = audioRecorder.uri;
-			if (!uri) throw new Error('Sin URI');
+			console.log('[Voice] URI grabación:', uri);
+			if (!uri) throw new Error('Sin URI de grabación');
 
 			const base64 = await FileSystem.readAsStringAsync(uri, {
-				encoding: FileSystem.EncodingType.Base64,
+				encoding: 'base64',
 			});
+			console.log('[Voice] base64 length:', base64.length);
 
+			console.log('[Voice] enviando a /detectar-destino...');
 			const result = await detectarDestino(base64, 'audio/mp4');
-			const transcripcion = result.transcripcion?.trim();
+			console.log('[Voice] respuesta:', JSON.stringify(result));
 			setIsTyping(false);
 
-			if (transcripcion) {
-				handleSend(transcripcion);
+			if (result.lugarDestino) {
+				pushBotReply(`Llevándote al mapa para buscar "${result.lugarDestino}".`);
+				router.push({ pathname: '/', params: { voiceDestino: result.lugarDestino } });
+			} else if (result.transcripcion?.trim()) {
+				handleSend(result.transcripcion.trim());
 			} else {
 				pushBotReply('No pude entender el audio. Intenta de nuevo.');
 			}
-		} catch {
+		} catch (e) {
+			console.error('[Voice] error:', e);
 			setIsTyping(false);
 			pushBotReply('Error al procesar el audio. Intenta de nuevo.');
 		}
