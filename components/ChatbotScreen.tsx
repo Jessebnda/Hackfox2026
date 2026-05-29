@@ -1,4 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
+import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -16,6 +18,7 @@ import {
 import ScreenShell from '@/components/screen-shell';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { geminiGenerateText, getGeminiApiKey } from '@/services/geminiClient';
+import { detectarDestino } from '@/services/voiceDetector';
 
 type ChatbotScreenProps = {
 	bottomInset?: number;
@@ -53,9 +56,11 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 	const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
 	const [inputText, setInputText] = useState('');
 	const [isTyping, setIsTyping] = useState(false);
+	const [isRecording, setIsRecording] = useState(false);
 	const [sessionTime] = useState(() => new Date());
 	const flatListRef = useRef<FlatList<Message>>(null);
 	const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 	const router = useRouter();
 	const { keyboardInset, isKeyboardVisible } = useKeyboardInset(bottomInset);
 
@@ -160,6 +165,51 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 		void run();
 	};
 
+	const startRecording = async () => {
+		try {
+			const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+			if (!granted) return;
+
+			await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+			await audioRecorder.prepareToRecordAsync();
+			audioRecorder.record();
+			setIsRecording(true);
+		} catch {
+			// silently ignore if mic not available
+		}
+	};
+
+	const stopRecordingAndSend = async () => {
+		if (!isRecording) return;
+		setIsRecording(false);
+		setIsTyping(true);
+
+		try {
+			await audioRecorder.stop();
+			await setAudioModeAsync({ allowsRecording: false });
+
+			const uri = audioRecorder.uri;
+			if (!uri) throw new Error('Sin URI');
+
+			const base64 = await FileSystem.readAsStringAsync(uri, {
+				encoding: FileSystem.EncodingType.Base64,
+			});
+
+			const result = await detectarDestino(base64, 'audio/mp4');
+			const transcripcion = result.transcripcion?.trim();
+			setIsTyping(false);
+
+			if (transcripcion) {
+				handleSend(transcripcion);
+			} else {
+				pushBotReply('No pude entender el audio. Intenta de nuevo.');
+			}
+		} catch {
+			setIsTyping(false);
+			pushBotReply('Error al procesar el audio. Intenta de nuevo.');
+		}
+	};
+
 	const clearConversation = () => {
 		setMessages([WELCOME_MESSAGE]);
 		setInputText('');
@@ -253,24 +303,31 @@ export default function ChatbotScreen({ bottomInset = 0, onOpenMap }: ChatbotScr
 					>
 					<TextInput
 						style={styles.input}
-						placeholder="Escribe aquí..."
-						placeholderTextColor="#8b8b8b"
+						placeholder={isRecording ? 'Grabando...' : 'Escribe aquí...'}
+						placeholderTextColor={isRecording ? '#e80000' : '#8b8b8b'}
 						value={inputText}
 						onChangeText={setInputText}
+						editable={!isRecording}
 						multiline
 						maxLength={500}
 					/>
-					<Pressable
-						style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-						onPress={() => handleSend()}
-						disabled={!inputText.trim()}
-					>
-						<MaterialCommunityIcons
-							name="send"
-							size={24}
-							color={inputText.trim() ? '#fff' : '#c7c7c7'}
-						/>
-					</Pressable>
+					{inputText.trim() && !isRecording ? (
+						<Pressable style={styles.sendButton} onPress={() => handleSend()}>
+							<MaterialCommunityIcons name="send" size={24} color="#fff" />
+						</Pressable>
+					) : (
+						<Pressable
+							style={[styles.sendButton, isRecording && styles.sendButtonRecording]}
+							onPressIn={startRecording}
+							onPressOut={stopRecordingAndSend}
+						>
+							<MaterialCommunityIcons
+								name={isRecording ? 'stop' : 'microphone'}
+								size={24}
+								color="#fff"
+							/>
+						</Pressable>
+					)}
 				</View>
 				</View>
 			</ScreenShell>
@@ -464,6 +521,9 @@ const styles = StyleSheet.create({
 	},
 	sendButtonDisabled: {
 		backgroundColor: '#e5e7eb',
+	},
+	sendButtonRecording: {
+		backgroundColor: '#b00000',
 	},
 	mapButton: {
 		flexDirection: 'row',
