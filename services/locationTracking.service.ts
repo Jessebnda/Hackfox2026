@@ -1,5 +1,9 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import { darInstruccion, isSpeechInitialized } from './speech.service';
+import { verificarProximidadSiguientePunto, obtenerInstruccionActual } from './geofencing.service';
+
+let foregroundSubscription: Location.LocationSubscription | null = null;
 
 // ─────────────────────────────────────────────
 // Constantes
@@ -34,25 +38,50 @@ export async function startBackgroundTracking(): Promise<boolean> {
       return false;
     }
 
-    // 2. Verificar permiso de ubicación en segundo plano (crítico para background)
-    const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-    if (backgroundStatus !== 'granted') {
-      console.warn('[LocationTracking] Permiso de ubicación en segundo plano denegado.');
-      console.warn('[LocationTracking] Las instrucciones NO funcionarán con la pantalla bloqueada.');
-      return false;
+    // 2-4. Intentar rastreo en segundo plano; si falla (ej. Expo Go en iOS), usar foreground
+    try {
+      const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundStatus !== 'granted') {
+        throw new Error('Permiso de background denegado');
+      }
+
+      const tareaActiva = await isTrackingActive();
+      if (tareaActiva) {
+        console.log('[LocationTracking] El rastreo ya estaba activo, no se inicia de nuevo.');
+        return true;
+      }
+
+      await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, TRACKING_CONFIG);
+      console.log('[LocationTracking] Rastreo en segundo plano iniciado ✅');
+
+    } catch (bgError) {
+      console.warn('[LocationTracking] Background no disponible, usando foreground:', bgError);
+
+      if (foregroundSubscription) {
+        console.log('[LocationTracking] Rastreo en primer plano ya activo.');
+        return true;
+      }
+
+      foregroundSubscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
+        async (ubicacion) => {
+          const { latitude, longitude } = ubicacion.coords;
+          try {
+            const estaCerca = await verificarProximidadSiguientePunto(latitude, longitude);
+            if (estaCerca) {
+              const instruccion = obtenerInstruccionActual();
+              if (instruccion && isSpeechInitialized()) {
+                await darInstruccion(instruccion);
+              }
+            }
+          } catch (err) {
+            console.error('[LocationTracking] Error procesando ubicación (foreground):', err);
+          }
+        }
+      );
+      console.log('[LocationTracking] Rastreo en primer plano iniciado ✅');
     }
 
-    // 3. Verificar si la tarea de background ya está corriendo (evitar duplicados)
-    const tareaActiva = await isTrackingActive();
-    if (tareaActiva) {
-      console.log('[LocationTracking] El rastreo ya estaba activo, no se inicia de nuevo.');
-      return true;
-    }
-
-    // 4. Arrancar el rastreo en segundo plano
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, TRACKING_CONFIG);
-
-    console.log('[LocationTracking] Rastreo en segundo plano iniciado ✅');
     return true;
 
   } catch (error) {
@@ -76,8 +105,14 @@ export async function stopBackgroundTracking(): Promise<void> {
       return;
     }
 
-    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    console.log('[LocationTracking] Rastreo detenido ✅');
+    if (foregroundSubscription) {
+      foregroundSubscription.remove();
+      foregroundSubscription = null;
+      console.log('[LocationTracking] Rastreo en primer plano detenido ✅');
+    } else {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      console.log('[LocationTracking] Rastreo en segundo plano detenido ✅');
+    }
 
   } catch (error) {
     console.error('[LocationTracking] Error al detener el rastreo:', error);
@@ -92,10 +127,10 @@ export async function stopBackgroundTracking(): Promise<void> {
 // ─────────────────────────────────────────────
 
 export async function isTrackingActive(): Promise<boolean> {
+  if (foregroundSubscription) return true;
   try {
     return await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
   } catch {
-    // Si la tarea nunca fue registrada, expo lanza error — devolvemos false
     return false;
   }
 }
