@@ -3,8 +3,8 @@ import { Tabs } from "expo-router";
 import { Platform } from "react-native";
 import { SvgXml } from "react-native-svg";
 
-const TGUIA_LOGO = `<svg viewBox="0 0 480 310" xmlns="http://www.w3.org/2000/svg">
-  <g transform="translate(180, 10) scale(0.48)">
+const TGUIA_LOGO = `<svg viewBox="0 0 240 70" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(0, 2) scale(0.25)">
     <path d="M100,252 C55,177 20,150 20,95 A80,80 0 1 1 180,95 C180,150 145,177 100,252 Z" fill="#e80000"/>
     <circle cx="83" cy="113" r="27" fill="#ffffff"/>
     <circle cx="83" cy="113" r="18" fill="#e80000"/>
@@ -15,16 +15,15 @@ const TGUIA_LOGO = `<svg viewBox="0 0 480 310" xmlns="http://www.w3.org/2000/svg
     <line x1="113" y1="90" x2="120" y2="108" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
     <line x1="120" y1="108" x2="131" y2="108" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
   </g>
-  <text font-size="78" font-weight="800" x="240" y="226" text-anchor="middle">
+  <text font-size="48" font-weight="800" x="52" y="52" text-anchor="start">
     <tspan fill="#e80000">t</tspan><tspan fill="#111111">-gu</tspan><tspan fill="#e80000">IA</tspan>
   </text>
-  <text font-size="24" font-weight="600" letter-spacing="3" x="242" y="268" text-anchor="middle" fill="#111111">TIJUANA ACCESIBLE</text>
 </svg>`;
 
 export default function TabsLayout() {
   return (
     <Tabs
-      screenOptions={({ route }) => ({
+      screenOptions={() => ({
         headerShown: true,
         headerShadowVisible: false,
         headerStyle: {
@@ -33,7 +32,7 @@ export default function TabsLayout() {
         },
         headerTitleAlign: 'left',
         headerTitle: () => (
-          <SvgXml xml={TGUIA_LOGO} width={96} height={62} />
+          <SvgXml xml={TGUIA_LOGO} width={138} height={40} style={{ marginLeft: 4 }} />
         ),
         tabBarActiveTintColor: '#e80000',
         tabBarInactiveTintColor: '#6b7280',
